@@ -49,6 +49,12 @@ type Config struct {
 	// list syncs nothing.
 	Include []string `mapstructure:"include" json:"include"`
 	Exclude []string `mapstructure:"exclude" json:"exclude"`
+
+	// Auto-sync trigger settings (P4). Each is opt-in; the user chooses which.
+	AutoHooks       bool `mapstructure:"autoHooks" json:"autoHooks"`
+	AutoLaunchd     bool `mapstructure:"autoLaunchd" json:"autoLaunchd"`
+	AutoWatch       bool `mapstructure:"autoWatch" json:"autoWatch"`
+	AutoIntervalSec int  `mapstructure:"autoIntervalSec" json:"autoIntervalSec"`
 }
 
 // Dir returns the ccsync config directory, creating nothing.
@@ -148,6 +154,10 @@ func Save(c *Config) error {
 	v.Set("gdriveFolderId", c.GDriveFolderID)
 	v.Set("gdriveCredentials", c.GDriveCredentials)
 	v.Set("gdriveToken", c.GDriveToken)
+	v.Set("autoHooks", c.AutoHooks)
+	v.Set("autoLaunchd", c.AutoLaunchd)
+	v.Set("autoWatch", c.AutoWatch)
+	v.Set("autoIntervalSec", c.AutoIntervalSec)
 	v.Set("claudeDir", c.ClaudeDir)
 	v.Set("workDir", c.WorkDir)
 	v.Set("include", c.Include)

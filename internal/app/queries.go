@@ -52,26 +52,32 @@ func (s *Syncer) Manifest() (*domain.Manifest, error) {
 	return s.loadManifest()
 }
 
-// RemoveDevice pulls the latest chain, removes a device, and publishes.
+// RemoveDevice pulls the latest chain, removes a device, and publishes, under the
+// sync lock.
 func (s *Syncer) RemoveDevice(name string) (bool, error) {
-	if err := s.EnsureReady(); err != nil {
-		return false, err
-	}
-	if err := s.refresh(); err != nil {
-		return false, err
-	}
-	m, err := s.loadManifest()
-	if err != nil {
-		return false, err
-	}
-	if !m.RemoveDevice(name) {
-		return false, nil
-	}
-	if err := s.saveManifest(m); err != nil {
-		return false, err
-	}
-	if err := s.storage.Push(fmt.Sprintf("device: remove %s", name)); err != nil {
-		return false, err
-	}
-	return true, nil
+	removed := false
+	err := s.withLock(func() error {
+		if err := s.EnsureReady(); err != nil {
+			return err
+		}
+		if err := s.refresh(); err != nil {
+			return err
+		}
+		m, err := s.loadManifest()
+		if err != nil {
+			return err
+		}
+		if !m.RemoveDevice(name) {
+			return nil
+		}
+		if err := s.saveManifest(m); err != nil {
+			return err
+		}
+		if err := s.storage.Push(fmt.Sprintf("device: remove %s", name)); err != nil {
+			return err
+		}
+		removed = true
+		return nil
+	})
+	return removed, err
 }

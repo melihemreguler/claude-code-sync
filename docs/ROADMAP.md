@@ -147,17 +147,20 @@ Covers **#10, #5**.
   cloud credentials in the dev environment) — they need a real bucket/folder to
   verify; the port + Mirror contract is the correctness anchor.
 
-### P4 — Auto-sync triggers
+### P4 — Auto-sync triggers ✅ (shipped)
 Covers **#4** (config-driven per D5).
-- `trigger/hook` (SessionStart/Stop), `trigger/launchd` (interval),
-  `trigger/fsnotify` (debounced watcher); a sync lockfile serializes them.
-- `ccsync auto enable/disable`, with selection + interval in config.
-- **Also fold in here:** cross-device concurrency safety for blob backends — a
-  manifest-update guard (local lock + optimistic concurrency / ETag precondition
-  on S3, md5/version check on Drive) so simultaneous syncs can't clobber manifest
-  metadata. (git already rebases.)
-- **Acceptance:** enabling hooks makes a new/finished session sync with no manual
-  command; concurrent triggers never corrupt state.
+- `hookcfg` (Claude Code SessionStart→pull / SessionEnd→push, merged into
+  settings.json preserving other hooks), `launchd` (periodic sync agent) and a
+  keep-alive `watch` agent, plus the `ccsync watch` fsnotify command (debounced).
+- A `gofrs/flock` lock around Sync/Pull/Push/RemoveDevice serializes overlapping
+  triggers on one machine (skip, not queue); `ccsync sync` exits cleanly when busy.
+- `ccsync auto enable/disable/status`; selections persisted in config.
+- **Acceptance met:** verified hooks install/remove (other hooks preserved) and
+  that a held lock makes a concurrent sync skip. launchd/watch plist generation is
+  unit-tested; loading uses launchctl on the user's machine.
+- **Deferred:** cross-device manifest concurrency for blob backends (optimistic
+  ETag/md5 CAS) — the local lock covers same-machine triggers; cross-device
+  simultaneous sync on S3/Drive remains best-avoided (documented).
 
 ### P5 — Welcome tour + join/merge flows
 Covers **#12** (+ #7 guidance).
