@@ -1,0 +1,10 @@
+# build output
+/ccsync
+/dist/
+
+# go
+*.test
+*.out
+
+# os
+.DS_Store
