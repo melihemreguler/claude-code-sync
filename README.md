@@ -133,10 +133,17 @@ ccsync auto disable                        # remove all of the above
 ```
 
 - **hooks** add `SessionStart → pull` and `SessionEnd → push` to your Claude Code
-  `settings.json` (other hooks are preserved).
+  `settings.json` (other hooks are preserved). These run **synchronously**, so a
+  slow backend adds a little latency to session start/end — prefer **launchd** or
+  **watch** if you want zero-latency, fully background syncing.
 - **launchd** installs a periodic `ccsync sync` LaunchAgent.
-- **watch** installs a keep-alive agent running `ccsync watch` (debounced
-  real-time sync); you can also run `ccsync watch` in a terminal.
+- **watch** installs a keep-alive agent running `ccsync watch` (real-time sync,
+  batched over a short debounce window); you can also run `ccsync watch` in a
+  terminal.
+
+The hook/agent commands embed the absolute path of the `ccsync` binary at enable
+time; if you move or reinstall it, run `ccsync auto enable …` again. Avoid
+installing `ccsync` to a path containing spaces.
 
 A local lock serializes overlapping triggers, so concurrent runs on one machine
 skip rather than collide.
