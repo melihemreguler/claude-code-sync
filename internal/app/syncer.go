@@ -6,6 +6,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -13,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gofrs/flock"
 	"github.com/melihemreguler/claude-code-sync/internal/adapters/agecrypto"
 	"github.com/melihemreguler/claude-code-sync/internal/adapters/blobstore"
 	"github.com/melihemreguler/claude-code-sync/internal/adapters/claudefs"
@@ -149,18 +151,69 @@ func (s *Syncer) seed() error {
 	return os.MkdirAll(filepath.Join(s.storage.RootDir(), objectsDir), 0o755)
 }
 
+// ErrSyncInProgress is returned when another sync holds the lock on this machine.
+var ErrSyncInProgress = errors.New("another sync is in progress")
+
+// withLock serializes mutating operations on this machine so concurrent triggers
+// (hook, launchd, watcher) never run at once. It skips rather than queues.
+func (s *Syncer) withLock(fn func() error) error {
+	dir, err := config.Dir()
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	fl := flock.New(filepath.Join(dir, "sync.lock"))
+	locked, err := fl.TryLock()
+	if err != nil {
+		return err
+	}
+	if !locked {
+		return ErrSyncInProgress
+	}
+	defer func() { _ = fl.Unlock() }()
+	return fn()
+}
+
 // Sync pulls remote changes, then pushes local ones.
 func (s *Syncer) Sync() (in Result, out Result, err error) {
-	if in, err = s.Pull(); err != nil {
-		return in, out, err
-	}
-	out, err = s.Push()
+	err = s.withLock(func() error {
+		var e error
+		if in, e = s.pull(); e != nil {
+			return e
+		}
+		out, e = s.push()
+		return e
+	})
 	return in, out, err
 }
 
-// Pull integrates remote sessions into the local Claude store, decrypting each
-// object and translating each logical project to this device's folder name.
+// Pull integrates remote sessions into the local Claude store under the lock.
 func (s *Syncer) Pull() (Result, error) {
+	var res Result
+	err := s.withLock(func() error {
+		var e error
+		res, e = s.pull()
+		return e
+	})
+	return res, err
+}
+
+// Push sends local sessions to storage under the lock.
+func (s *Syncer) Push() (Result, error) {
+	var res Result
+	err := s.withLock(func() error {
+		var e error
+		res, e = s.push()
+		return e
+	})
+	return res, err
+}
+
+// pull integrates remote sessions into the local Claude store, decrypting each
+// object and translating each logical project to this device's folder name.
+func (s *Syncer) pull() (Result, error) {
 	if err := s.EnsureReady(); err != nil {
 		return Result{}, err
 	}
@@ -232,9 +285,9 @@ func (s *Syncer) pullProject(key domain.CanonicalKey, entry domain.ProjectEntry,
 	return count, nil
 }
 
-// Push encrypts selected local sessions into storage under their canonical keys,
+// push encrypts selected local sessions into storage under their canonical keys,
 // records this device and its folder mappings in the manifest, and publishes.
-func (s *Syncer) Push() (Result, error) {
+func (s *Syncer) push() (Result, error) {
 	if err := s.EnsureReady(); err != nil {
 		return Result{}, err
 	}

@@ -120,6 +120,34 @@ before it leaves your machine.
 
 All devices in a chain must use the same backend and target.
 
+## Auto-sync
+
+Sync hands-free with any combination of triggers (you choose):
+
+```sh
+ccsync auto enable --hooks                 # sync on Claude Code session start/end
+ccsync auto enable --launchd --interval 15m # periodic background sync
+ccsync auto enable --watch                 # real-time, on file change
+ccsync auto status
+ccsync auto disable                        # remove all of the above
+```
+
+- **hooks** add `SessionStart → pull` and `SessionEnd → push` to your Claude Code
+  `settings.json` (other hooks are preserved). These run **synchronously**, so a
+  slow backend adds a little latency to session start/end — prefer **launchd** or
+  **watch** if you want zero-latency, fully background syncing.
+- **launchd** installs a periodic `ccsync sync` LaunchAgent.
+- **watch** installs a keep-alive agent running `ccsync watch` (real-time sync,
+  batched over a short debounce window); you can also run `ccsync watch` in a
+  terminal.
+
+The hook/agent commands embed the absolute path of the `ccsync` binary at enable
+time; if you move or reinstall it, run `ccsync auto enable …` again. Avoid
+installing `ccsync` to a path containing spaces.
+
+A local lock serializes overlapping triggers, so concurrent runs on one machine
+skip rather than collide.
+
 ## Commands
 
 | Command | What it does |
@@ -130,6 +158,8 @@ All devices in a chain must use the same backend and target.
 | `ccsync status` | Config, which projects sync/skip (with cwd + key), device chain |
 | `ccsync device list` | The chain, plus each device's include/exclude dirs |
 | `ccsync device remove <name>` | Drop a device from the chain |
+| `ccsync auto enable/disable/status` | Manage auto-sync triggers (hooks, launchd, watcher) |
+| `ccsync watch` | Foreground real-time watcher (debounced sync) |
 | `ccsync key show` | Print the chain identity (secret) to join another device |
 | `ccsync key id` | Print the chain's public id (age recipient) |
 | `ccsync filter list` | Show include/exclude directory roots |
