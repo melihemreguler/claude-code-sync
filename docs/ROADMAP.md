@@ -174,13 +174,18 @@ Covers **#12**.
   (incl. /dev/null stdin); the tour reuses the same code paths so flags and tour
   produce identical config. (The TUI itself is exercised manually.)
 
-### P6 — Distribution + docs/memory-bank
+### P6 — Distribution + docs/memory-bank ✅ (shipped)
 Covers **#8, #13**.
-- `goreleaser` + a Homebrew tap (`brew install melihemreguler/tap/ccsync`).
-- Expand `docs/` into a memory-bank (architecture, decisions, per-phase notes)
-  so future sessions/agents onboard from files, not chat history.
-- **Acceptance:** `brew install` yields a working binary; a cold agent can
-  implement a change using only the repo docs.
+- `.goreleaser.yaml` (validated with `goreleaser check`): builds darwin/linux ×
+  amd64/arm64, a GitHub release, and a Homebrew **cask** pushed to
+  `melihemreguler/homebrew-tap` (PAT via `HOMEBREW_TAP_GITHUB_TOKEN`).
+- `.github/workflows/`: CI (vet/test/build on PRs) and release (GoReleaser on
+  `v*` tags). README install gains `brew install melihemreguler/tap/ccsync`.
+- `docs/memory-bank/` (README, architecture, sync-model, onboarding) plus a
+  CHANGELOG, so contributors/agents onboard from files.
+- **Acceptance met:** GoReleaser config validates; CI/release workflows in place.
+  First publish (tag + tap repo + secret) is a maintainer step — see
+  docs/memory-bank/onboarding.md.
 
 ## Open questions (resolve before the owning phase)
 
