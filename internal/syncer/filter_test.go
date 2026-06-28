@@ -13,8 +13,10 @@ func TestMatchFilter(t *testing.T) {
 		{"github included by default-style glob", "-Users-me-dev-github-foo", []string{"*github*"}, nil, true},
 		{"work repo excluded by not matching include", "-Users-me-turknet-secret", []string{"*github*"}, nil, false},
 		{"exclude beats include", "-Users-me-dev-github-work", []string{"*github*"}, []string{"*work*"}, false},
-		{"empty include means all", "-Users-me-anything", nil, nil, true},
-		{"empty include but excluded", "-Users-me-turknet-x", nil, []string{"*turknet*"}, false},
+		{"empty include syncs nothing (safety)", "-Users-me-anything", nil, nil, false},
+		{"empty include, excluded too", "-Users-me-turknet-x", nil, []string{"*turknet*"}, false},
+		{"explicit star includes everything", "-Users-me-anything", []string{"*"}, nil, true},
+		{"star include but excluded", "-Users-me-turknet-x", []string{"*"}, []string{"*turknet*"}, false},
 		{"multiple includes, second matches", "-Users-me-personal-blog", []string{"*github*", "*personal*"}, nil, true},
 		{"no include match", "-Users-me-random", []string{"*github*"}, nil, false},
 	}

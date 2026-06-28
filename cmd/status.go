@@ -62,7 +62,7 @@ func runStatus(_ *cobra.Command, _ []string) error {
 		if reg, err := registry.Load(cfg.WorkDir); err == nil {
 			fmt.Printf("\ndevice chain (%d):\n", len(reg.Devices))
 			for _, d := range reg.Devices {
-				fmt.Printf("  • %-20s last sync %s\n", d.Name, d.LastSync)
+				fmt.Printf("  • %-20s %-12s last sync %s\n", d.Name, d.Platform, d.LastSync)
 			}
 		}
 	}

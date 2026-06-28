@@ -42,7 +42,15 @@ var deviceRemoveCmd = &cobra.Command{
 	Short: "Drop a device from the chain",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(_ *cobra.Command, args []string) error {
-		cfg, reg, err := loadRegistry()
+		cfg, err := config.Load()
+		if err != nil {
+			return err
+		}
+		// Pull first so we mutate the current roster, not a stale clone.
+		if err := syncer.New(cfg).RefreshRepo(); err != nil {
+			return err
+		}
+		reg, err := registry.Load(cfg.WorkDir)
 		if err != nil {
 			return err
 		}

@@ -134,9 +134,16 @@ Per-machine config lives at `~/.config/ccsync/config.json` and is **not** synced
 
 ## Caveats
 
-- **Don't run the same session on two machines at once.** Union-merge keeps you
-  conflict-free for appends, but interleaved edits to one live session can produce
-  duplicate lines. Sync between sessions, not during.
+- **An empty include list syncs nothing.** This is deliberate: removing your last
+  include pattern should never silently start syncing every project. Use an
+  explicit `*` pattern to include everything.
+- **Don't run the same session on two machines at once.** Sync compares file
+  content (and, as a tiebreaker, modification time) to decide what is newer.
+  Because git does not preserve modification times, this heuristic is reliable
+  for sequential use but can mis-order genuinely concurrent edits to the *same*
+  live session. Union-merge of `*.jsonl` is the backstop. Sync between sessions,
+  not during. (A content-addressed sync engine that removes this caveat is
+  planned — see the roadmap.)
 - `ccsync` syncs files; it does not migrate paths. See the path note above.
 - This is not an official Anthropic product.
 

@@ -2,6 +2,8 @@ package cmd
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 
 	"github.com/melihemreguler/claude-code-sync/internal/config"
 	"github.com/spf13/cobra"
@@ -57,6 +59,16 @@ func mutateFilter(add bool) error {
 	if filterInclude == "" && filterExclude == "" {
 		return fmt.Errorf("pass --include <glob> or --exclude <glob>")
 	}
+	if add {
+		for _, p := range []string{filterInclude, filterExclude} {
+			if p == "" {
+				continue
+			}
+			if _, err := filepath.Match(p, ""); err != nil {
+				return fmt.Errorf("invalid glob %q: %w", p, err)
+			}
+		}
+	}
 	cfg, err := config.Load()
 	if err != nil {
 		return err
@@ -69,6 +81,9 @@ func mutateFilter(add bool) error {
 	}
 	if err := config.Save(cfg); err != nil {
 		return err
+	}
+	if len(cfg.Include) == 0 {
+		fmt.Fprintln(os.Stderr, "warning: include list is now empty — nothing will sync. Add a pattern (use \"*\" for everything).")
 	}
 	printFilters(cfg)
 	return nil

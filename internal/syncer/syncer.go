@@ -5,15 +5,22 @@
 package syncer
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/melihemreguler/claude-code-sync/internal/config"
 	"github.com/melihemreguler/claude-code-sync/internal/gitutil"
 	"github.com/melihemreguler/claude-code-sync/internal/registry"
 )
+
+// tmpSuffix marks in-progress atomic writes; such files are never synced.
+const tmpSuffix = ".ccsync.tmp"
 
 // ProjectsSubdir is where Claude Code stores per-project session files, mirrored
 // at the same path inside the data repo.
@@ -71,7 +78,30 @@ func (s *Syncer) SeedRepo() error {
 			return err
 		}
 	}
+	ignore := filepath.Join(s.cfg.WorkDir, ".gitignore")
+	if _, err := os.Stat(ignore); os.IsNotExist(err) {
+		if err := os.WriteFile(ignore, []byte("*"+tmpSuffix+"\n.DS_Store\n"), 0o644); err != nil {
+			return err
+		}
+	}
 	return nil
+}
+
+// RefreshRepo ensures the repo exists locally and is up to date with the remote,
+// without touching the Claude directory. Used before mutating synced state (e.g.
+// the device roster) so we don't act on or push from a stale clone.
+func (s *Syncer) RefreshRepo() error {
+	if err := s.EnsureRepo(); err != nil {
+		return err
+	}
+	has, err := gitutil.RemoteHasBranches(s.cfg.WorkDir)
+	if err != nil {
+		return err
+	}
+	if !has {
+		return nil
+	}
+	return gitutil.Stream(s.cfg.WorkDir, "pull", "--rebase", "--autostash")
 }
 
 // Pull fetches remote changes and applies newer sessions into the Claude dir.
@@ -190,7 +220,7 @@ func copyNewer(src, dst string, include, exclude []string) (Result, error) {
 
 func copyTreeNewer(srcDir, dstDir string) (int, error) {
 	count := 0
-	err := filepath.Walk(srcDir, func(path string, info os.FileInfo, err error) error {
+	err := filepath.WalkDir(srcDir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -199,13 +229,33 @@ func copyTreeNewer(srcDir, dstDir string) (int, error) {
 			return err
 		}
 		target := filepath.Join(dstDir, rel)
-		if info.IsDir() {
+		if d.IsDir() {
 			return os.MkdirAll(target, 0o755)
 		}
-		if di, err := os.Stat(target); err == nil && !info.ModTime().After(di.ModTime()) {
-			return nil // destination is same age or newer — skip
+		if strings.HasSuffix(d.Name(), tmpSuffix) {
+			return nil // never propagate our own in-progress writes
 		}
-		if err := copyFile(path, target); err != nil {
+		srcInfo, err := d.Info()
+		if err != nil {
+			return err
+		}
+		if dstInfo, err := os.Stat(target); err == nil {
+			// Content-equal files are skipped regardless of mtime. git does not
+			// preserve mtimes, so without this a checkout would look "newer" and
+			// cause churn; comparing content avoids needless overwrites and
+			// shrinks the window in which a stale copy could clobber edits.
+			same, err := sameContent(path, target, srcInfo, dstInfo)
+			if err != nil {
+				return err
+			}
+			if same {
+				return nil
+			}
+			if !srcInfo.ModTime().After(dstInfo.ModTime()) {
+				return nil // different content but destination is at least as new
+			}
+		}
+		if err := copyFile(path, target, srcInfo); err != nil {
 			return err
 		}
 		count++
@@ -214,9 +264,39 @@ func copyTreeNewer(srcDir, dstDir string) (int, error) {
 	return count, err
 }
 
+// sameContent reports whether two files have identical bytes, short-circuiting
+// on size before hashing.
+func sameContent(a, b string, ai, bi fs.FileInfo) (bool, error) {
+	if ai.Size() != bi.Size() {
+		return false, nil
+	}
+	ha, err := hashFile(a)
+	if err != nil {
+		return false, err
+	}
+	hb, err := hashFile(b)
+	if err != nil {
+		return false, err
+	}
+	return ha == hb, nil
+}
+
+func hashFile(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
 // copyFile copies src to dst atomically (via a temp file + rename) and preserves
 // the source modification time so newness comparisons stay meaningful.
-func copyFile(src, dst string) error {
+func copyFile(src, dst string, srcInfo fs.FileInfo) error {
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 		return err
 	}
@@ -226,7 +306,7 @@ func copyFile(src, dst string) error {
 	}
 	defer in.Close()
 
-	tmp := dst + ".ccsync.tmp"
+	tmp := dst + tmpSuffix
 	out, err := os.Create(tmp)
 	if err != nil {
 		return err
@@ -244,8 +324,6 @@ func copyFile(src, dst string) error {
 		os.Remove(tmp)
 		return err
 	}
-	if si, err := os.Stat(src); err == nil {
-		_ = os.Chtimes(dst, si.ModTime(), si.ModTime())
-	}
+	_ = os.Chtimes(dst, srcInfo.ModTime(), srcInfo.ModTime())
 	return nil
 }
