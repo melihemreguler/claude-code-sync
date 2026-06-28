@@ -190,6 +190,9 @@ func (s *Syncer) pullProject(key domain.CanonicalKey, entry domain.ProjectEntry,
 	for rel, meta := range entry.Objects {
 		localPath := filepath.Join(s.store.ProjectPath(folder), filepath.FromSlash(rel))
 		if info, err := os.Stat(localPath); err == nil {
+			if info.ModTime().UnixNano() == meta.MTime {
+				continue // fast path: untouched since last sync
+			}
 			data, err := os.ReadFile(localPath)
 			if err != nil {
 				return count, err
@@ -291,12 +294,19 @@ func (s *Syncer) pushProject(key domain.CanonicalKey, folder string, m *domain.M
 		if err != nil {
 			return err
 		}
+		mtime := info.ModTime().UnixNano()
+		// Fast path: an untouched file (mtime unchanged since last sync) needs no
+		// read/hash. We set the local mtime on pull and record it on push, so an
+		// equal mtime means the content is what storage already has.
+		if meta, ok := entry.Objects[rel]; ok && mtime == meta.MTime {
+			return nil
+		}
+
 		data, err := os.ReadFile(path)
 		if err != nil {
 			return err
 		}
 		hash := fileutil.HashBytes(data)
-		mtime := info.ModTime().UnixNano()
 
 		if meta, ok := entry.Objects[rel]; ok {
 			if meta.Hash == hash {
@@ -325,7 +335,7 @@ func (s *Syncer) pushProject(key domain.CanonicalKey, folder string, m *domain.M
 }
 
 func (s *Syncer) objectPath(key domain.CanonicalKey, rel string) string {
-	return filepath.Join(s.storage.RootDir(), objectsDir, domain.KeyHash(key), filepath.FromSlash(rel)+objectExt)
+	return filepath.Join(s.storage.RootDir(), objectsDir, s.crypto.HashName(string(key)), filepath.FromSlash(rel)+objectExt)
 }
 
 // resolveLocalKeys maps each local project's canonical key to its folder name so

@@ -5,6 +5,9 @@ package agecrypto
 
 import (
 	"bytes"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 
@@ -15,6 +18,7 @@ import (
 type Crypto struct {
 	identity  *age.X25519Identity
 	recipient *age.X25519Recipient
+	nameKey   []byte // HMAC key for opaque object names, derived from the identity
 }
 
 // New builds a Crypto from an age identity string ("AGE-SECRET-KEY-1…").
@@ -23,7 +27,16 @@ func New(identityStr string) (*Crypto, error) {
 	if err != nil {
 		return nil, fmt.Errorf("invalid chain identity: %w", err)
 	}
-	return &Crypto{identity: id, recipient: id.Recipient()}, nil
+	nameKey := sha256.Sum256([]byte("ccsync/object-name\x00" + identityStr))
+	return &Crypto{identity: id, recipient: id.Recipient(), nameKey: nameKey[:]}, nil
+}
+
+// HashName returns an HMAC of name keyed by a secret derived from the chain
+// identity, so object directory names cannot be precomputed from known repo names.
+func (c *Crypto) HashName(name string) string {
+	mac := hmac.New(sha256.New, c.nameKey)
+	mac.Write([]byte(name))
+	return hex.EncodeToString(mac.Sum(nil))
 }
 
 // Generate creates a fresh chain identity, returning the secret identity string

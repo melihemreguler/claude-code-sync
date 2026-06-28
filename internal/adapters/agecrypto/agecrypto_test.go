@@ -52,6 +52,21 @@ func TestOpenRejectsWrongIdentity(t *testing.T) {
 	}
 }
 
+func TestHashNameIsKeyedAndStable(t *testing.T) {
+	idA, _, _ := Generate()
+	idB, _, _ := Generate()
+	ca, _ := New(idA)
+	cb, _ := New(idB)
+
+	const name = "github.com/acme/widgets"
+	if ca.HashName(name) != ca.HashName(name) {
+		t.Error("HashName must be stable for the same identity")
+	}
+	if ca.HashName(name) == cb.HashName(name) {
+		t.Error("HashName must differ across identities (keyed, not a plain hash)")
+	}
+}
+
 func TestRecipientFromIdentityStable(t *testing.T) {
 	idStr, rec, _ := Generate()
 	got, err := RecipientFromIdentity(idStr)

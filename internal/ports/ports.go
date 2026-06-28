@@ -39,9 +39,13 @@ type Storage interface {
 	RootDir() string
 }
 
-// Crypto seals and opens payloads. The P1 implementation is a passthrough; age
-// encryption replaces it in P2 without touching the core.
+// Crypto seals and opens payloads, and derives opaque names for stored objects.
 type Crypto interface {
 	Seal(plaintext []byte) ([]byte, error)
 	Open(ciphertext []byte) ([]byte, error)
+	// HashName returns a stable, filesystem-safe directory name for a canonical
+	// key. age-backed implementations key this with a chain secret so an observer
+	// of the remote cannot confirm which projects are synced by guessing repo
+	// names.
+	HashName(name string) string
 }
