@@ -63,10 +63,10 @@ func mutateFilter(add bool) error {
 		return err
 	}
 	if filterInclude != "" {
-		cfg.Include = mutateList(cfg.Include, filterInclude, add)
+		cfg.Include = mutateList(cfg.Include, resolveRoot(filterInclude), add)
 	}
 	if filterExclude != "" {
-		cfg.Exclude = mutateList(cfg.Exclude, filterExclude, add)
+		cfg.Exclude = mutateList(cfg.Exclude, resolveRoot(filterExclude), add)
 	}
 	if err := config.Save(cfg); err != nil {
 		return err

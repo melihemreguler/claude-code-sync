@@ -93,17 +93,24 @@ func (s *Syncer) seed() error {
 	if err := os.MkdirAll(filepath.Join(root, objectsDir), 0o755); err != nil {
 		return err
 	}
-	writeIfMissing(filepath.Join(root, objectsDir, ".gitkeep"), nil)
-	writeIfMissing(filepath.Join(root, ".gitignore"), []byte("*"+fileutil.TmpSuffix+"\n.DS_Store\n"))
-	writeIfMissing(filepath.Join(root, ".gitattributes"),
-		[]byte("# Session logs are append-only — union-merge concurrent edits.\n*.jsonl merge=union\n"))
+	files := map[string][]byte{
+		filepath.Join(root, objectsDir, ".gitkeep"): nil,
+		filepath.Join(root, ".gitignore"):           []byte("*" + fileutil.TmpSuffix + "\n.DS_Store\n"),
+		filepath.Join(root, ".gitattributes"):       []byte("# Session logs are append-only — union-merge concurrent edits.\n*.jsonl merge=union\n"),
+	}
+	for path, content := range files {
+		if err := writeIfMissing(path, content); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
-func writeIfMissing(path string, content []byte) {
-	if _, err := os.Stat(path); os.IsNotExist(err) {
-		_ = os.WriteFile(path, content, 0o644)
+func writeIfMissing(path string, content []byte) error {
+	if _, err := os.Stat(path); err == nil {
+		return nil
 	}
+	return os.WriteFile(path, content, 0o644)
 }
 
 // Sync pulls remote changes, then pushes local ones.

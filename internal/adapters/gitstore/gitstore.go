@@ -45,9 +45,15 @@ func (s *Store) RemoteHasContent() (bool, error) {
 	return gitutil.RemoteHasBranches(s.workDir)
 }
 
-// Pull rebases the working copy onto the remote, auto-stashing local changes.
+// Pull rebases the working copy onto the remote, auto-stashing local changes. If
+// the rebase fails (e.g. a concurrent manifest edit on another device), it aborts
+// the rebase so the working copy is left clean rather than mid-rebase.
 func (s *Store) Pull() error {
-	return gitutil.Stream(s.workDir, "pull", "--rebase", "--autostash")
+	if err := gitutil.Stream(s.workDir, "pull", "--rebase", "--autostash"); err != nil {
+		_ = gitutil.Stream(s.workDir, "rebase", "--abort") // best-effort cleanup
+		return fmt.Errorf("pull failed and was rolled back (concurrent sync?): %w", err)
+	}
+	return nil
 }
 
 // Push stages everything, commits if there is anything to commit, and pushes,
@@ -67,7 +73,7 @@ func (s *Store) Push(message string) error {
 		return err
 	}
 	if err := s.push(); err != nil {
-		if e := gitutil.Stream(s.workDir, "pull", "--rebase", "--autostash"); e != nil {
+		if e := s.Pull(); e != nil {
 			return fmt.Errorf("push rejected and rebase failed: %w", e)
 		}
 		if err := s.push(); err != nil {

@@ -56,8 +56,8 @@ func runInit(_ *cobra.Command, _ []string) error {
 		RepoURL:   initRepo,
 		ClaudeDir: initClaudeDir,
 		WorkDir:   initWorkDir,
-		Include:   initInclude,
-		Exclude:   initExclude,
+		Include:   resolveRoots(initInclude),
+		Exclude:   resolveRoots(initExclude),
 	}
 	if err := config.Save(cfg); err != nil {
 		return err
