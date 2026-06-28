@@ -23,6 +23,9 @@ type Config struct {
 	Device string `mapstructure:"device" json:"device"`
 	// RepoURL is the git remote holding the synced session data. Keep it PRIVATE.
 	RepoURL string `mapstructure:"repoUrl" json:"repoUrl"`
+	// ChainID is the age recipient (public key) of the sync chain. It identifies
+	// which secret identity to load from the keychain; it is not itself secret.
+	ChainID string `mapstructure:"chainId" json:"chainId"`
 	// ClaudeDir is the Claude Code home (default ~/.claude).
 	ClaudeDir string `mapstructure:"claudeDir" json:"claudeDir"`
 	// WorkDir is the local clone of the data repo.
@@ -125,6 +128,7 @@ func Save(c *Config) error {
 	v := viper.New()
 	v.Set("device", c.Device)
 	v.Set("repoUrl", c.RepoURL)
+	v.Set("chainId", c.ChainID)
 	v.Set("claudeDir", c.ClaudeDir)
 	v.Set("workDir", c.WorkDir)
 	v.Set("include", c.Include)

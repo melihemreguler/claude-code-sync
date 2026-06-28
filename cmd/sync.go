@@ -14,7 +14,11 @@ func withSyncer(fn func(*app.Syncer) error) error {
 	if err != nil {
 		return err
 	}
-	return fn(app.New(cfg))
+	s, err := app.New(cfg)
+	if err != nil {
+		return err
+	}
+	return fn(s)
 }
 
 var syncCmd = &cobra.Command{

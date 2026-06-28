@@ -29,10 +29,22 @@ type DeviceEntry struct {
 	Exclude  []string `json:"exclude"`
 }
 
-// ProjectEntry maps a logical project to each device's local folder name for it.
+// ProjectEntry maps a logical project to each device's local folder name for it,
+// and tracks the encrypted session objects belonging to the project.
 type ProjectEntry struct {
-	Display string            `json:"display"`
-	Folders map[string]string `json:"folders"` // device name -> local folder name
+	Display string                `json:"display"`
+	Folders map[string]string     `json:"folders"` // device name -> local folder name
+	Objects map[string]ObjectMeta `json:"objects"` // relpath (slash-separated) -> meta
+}
+
+// ObjectMeta is the authoritative state of one session file. Because age
+// ciphertext is non-deterministic (the same plaintext encrypts differently every
+// time), change detection uses the plaintext Hash, and newness uses MTime — both
+// kept here inside the encrypted manifest rather than inferred from ciphertext or
+// from git, which does not preserve modification times.
+type ObjectMeta struct {
+	Hash  string `json:"hash"`  // sha256 hex of the plaintext
+	MTime int64  `json:"mtime"` // source modification time, unix nanoseconds
 }
 
 // KeyHash returns a filesystem-safe directory name for a canonical key.
@@ -97,18 +109,34 @@ func (m *Manifest) RecordProject(key CanonicalKey, display, device, folder strin
 	if m.Projects == nil {
 		m.Projects = map[string]ProjectEntry{}
 	}
-	entry, ok := m.Projects[string(key)]
-	if !ok {
-		entry = ProjectEntry{Folders: map[string]string{}}
-	}
-	if entry.Folders == nil {
-		entry.Folders = map[string]string{}
-	}
+	entry := m.project(key)
 	if display != "" {
 		entry.Display = display
 	}
 	entry.Folders[device] = folder
 	m.Projects[string(key)] = entry
+}
+
+// SetObject records the metadata for one session object under a project.
+func (m *Manifest) SetObject(key CanonicalKey, relpath string, meta ObjectMeta) {
+	entry := m.project(key)
+	entry.Objects[relpath] = meta
+	m.Projects[string(key)] = entry
+}
+
+// project returns the entry for key with its maps initialized.
+func (m *Manifest) project(key CanonicalKey) ProjectEntry {
+	if m.Projects == nil {
+		m.Projects = map[string]ProjectEntry{}
+	}
+	entry := m.Projects[string(key)]
+	if entry.Folders == nil {
+		entry.Folders = map[string]string{}
+	}
+	if entry.Objects == nil {
+		entry.Objects = map[string]ObjectMeta{}
+	}
+	return entry
 }
 
 // SortedDevices returns devices ordered by name for stable output.

@@ -26,5 +26,5 @@ func Execute() error {
 }
 
 func init() {
-	rootCmd.AddCommand(initCmd, syncCmd, pullCmd, pushCmd, statusCmd, deviceCmd, filterCmd)
+	rootCmd.AddCommand(initCmd, syncCmd, pullCmd, pushCmd, statusCmd, deviceCmd, filterCmd, keyCmd)
 }
