@@ -3,7 +3,6 @@ package cmd
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 
 	"github.com/melihemreguler/claude-code-sync/internal/config"
 	"github.com/spf13/cobra"
@@ -16,12 +15,12 @@ var (
 
 var filterCmd = &cobra.Command{
 	Use:   "filter",
-	Short: "Manage include/exclude path patterns",
+	Short: "Manage which directories sync (by path, not patterns)",
 }
 
 var filterListCmd = &cobra.Command{
 	Use:   "list",
-	Short: "Show include/exclude patterns",
+	Short: "Show include/exclude directory roots",
 	Args:  cobra.NoArgs,
 	RunE: func(_ *cobra.Command, _ []string) error {
 		cfg, err := config.Load()
@@ -35,39 +34,29 @@ var filterListCmd = &cobra.Command{
 
 var filterAddCmd = &cobra.Command{
 	Use:   "add",
-	Short: "Add an include or exclude pattern",
+	Short: "Add an include or exclude directory root",
 	Args:  cobra.NoArgs,
-	RunE:  func(c *cobra.Command, _ []string) error { return mutateFilter(true) },
+	RunE:  func(*cobra.Command, []string) error { return mutateFilter(true) },
 }
 
 var filterRemoveCmd = &cobra.Command{
 	Use:   "remove",
-	Short: "Remove an include or exclude pattern",
+	Short: "Remove an include or exclude directory root",
 	Args:  cobra.NoArgs,
-	RunE:  func(c *cobra.Command, _ []string) error { return mutateFilter(false) },
+	RunE:  func(*cobra.Command, []string) error { return mutateFilter(false) },
 }
 
 func init() {
 	for _, c := range []*cobra.Command{filterAddCmd, filterRemoveCmd} {
-		c.Flags().StringVar(&filterInclude, "include", "", "include glob")
-		c.Flags().StringVar(&filterExclude, "exclude", "", "exclude glob")
+		c.Flags().StringVar(&filterInclude, "include", "", "directory root to sync")
+		c.Flags().StringVar(&filterExclude, "exclude", "", "directory root to keep local")
 	}
 	filterCmd.AddCommand(filterListCmd, filterAddCmd, filterRemoveCmd)
 }
 
 func mutateFilter(add bool) error {
 	if filterInclude == "" && filterExclude == "" {
-		return fmt.Errorf("pass --include <glob> or --exclude <glob>")
-	}
-	if add {
-		for _, p := range []string{filterInclude, filterExclude} {
-			if p == "" {
-				continue
-			}
-			if _, err := filepath.Match(p, ""); err != nil {
-				return fmt.Errorf("invalid glob %q: %w", p, err)
-			}
-		}
+		return fmt.Errorf("pass --include <dir> or --exclude <dir>")
 	}
 	cfg, err := config.Load()
 	if err != nil {
@@ -83,7 +72,7 @@ func mutateFilter(add bool) error {
 		return err
 	}
 	if len(cfg.Include) == 0 {
-		fmt.Fprintln(os.Stderr, "warning: include list is now empty — nothing will sync. Add a pattern (use \"*\" for everything).")
+		fmt.Fprintln(os.Stderr, "warning: include list is now empty — nothing will sync.")
 	}
 	printFilters(cfg)
 	return nil

@@ -27,10 +27,11 @@ type Config struct {
 	ClaudeDir string `mapstructure:"claudeDir" json:"claudeDir"`
 	// WorkDir is the local clone of the data repo.
 	WorkDir string `mapstructure:"workDir" json:"workDir"`
-	// Include/Exclude are globs matched against project folder names under
-	// <ClaudeDir>/projects. Folder names embed the full project path, e.g.
-	// "-Users-me-dev-github-foo", so "*github*" selects ~/dev/github while
-	// leaving work repos (e.g. "*turknet*") untouched.
+	// Include/Exclude are directory roots (paths, not globs). A project is synced
+	// when its working directory lies within an include root and within no
+	// exclude root. E.g. include "~/dev/github" syncs everything under it while
+	// excluding "~/dev/github/work" keeps those sessions local. An empty include
+	// list syncs nothing.
 	Include []string `mapstructure:"include" json:"include"`
 	Exclude []string `mapstructure:"exclude" json:"exclude"`
 }
@@ -93,7 +94,7 @@ func Load() (*Config, error) {
 
 	v.SetDefault("claudeDir", DefaultClaudeDir())
 	v.SetDefault("workDir", DefaultWorkDir())
-	v.SetDefault("include", []string{"*github*"})
+	v.SetDefault("include", []string{})
 	v.SetDefault("exclude", []string{})
 
 	if err := v.ReadInConfig(); err != nil {
