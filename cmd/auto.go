@@ -70,29 +70,38 @@ func runAutoEnable(_ *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
+	if err := applyAuto(cfg, autoHooks, autoLaunchd, autoWatch, autoInterval); err != nil {
+		return err
+	}
+	return config.Save(cfg)
+}
+
+// applyAuto installs the selected triggers and records them on cfg (the caller
+// saves). Shared by `auto enable` and the init welcome tour.
+func applyAuto(cfg *config.Config, hooks, periodic, watch bool, interval time.Duration) error {
 	exe, err := os.Executable()
 	if err != nil {
 		return err
 	}
 	logPath := autoLogPath()
 
-	if autoHooks {
+	if hooks {
 		if err := hookcfg.Install(cfg.ClaudeDir, exe); err != nil {
 			return err
 		}
 		cfg.AutoHooks = true
 		fmt.Println("enabled: Claude Code hooks (pull on session start, push on end)")
 	}
-	if autoLaunchd {
-		spec := launchd.Spec{Label: syncAgentLabel, Args: []string{"sync"}, IntervalSec: int(autoInterval.Seconds()), LogPath: logPath}
+	if periodic {
+		spec := launchd.Spec{Label: syncAgentLabel, Args: []string{"sync"}, IntervalSec: int(interval.Seconds()), LogPath: logPath}
 		if err := launchd.Install(exe, spec); err != nil {
 			return err
 		}
 		cfg.AutoLaunchd = true
-		cfg.AutoIntervalSec = int(autoInterval.Seconds())
-		fmt.Printf("enabled: periodic sync every %s\n", autoInterval)
+		cfg.AutoIntervalSec = int(interval.Seconds())
+		fmt.Printf("enabled: periodic sync every %s\n", interval)
 	}
-	if autoWatch {
+	if watch {
 		spec := launchd.Spec{Label: watchAgentLabel, Args: []string{"watch"}, KeepAlive: true, LogPath: logPath}
 		if err := launchd.Install(exe, spec); err != nil {
 			return err
@@ -100,7 +109,7 @@ func runAutoEnable(_ *cobra.Command, _ []string) error {
 		cfg.AutoWatch = true
 		fmt.Println("enabled: real-time file watcher")
 	}
-	return config.Save(cfg)
+	return nil
 }
 
 func runAutoDisable(_ *cobra.Command, _ []string) error {

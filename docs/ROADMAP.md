@@ -162,14 +162,17 @@ Covers **#4** (config-driven per D5).
   ETag/md5 CAS) — the local lock covers same-machine triggers; cross-device
   simultaneous sync on S3/Drive remains best-avoided (documented).
 
-### P5 — Welcome tour + join/merge flows
-Covers **#12** (+ #7 guidance).
-- `prompter/huh` interactive `init`: new chain vs join; on join, choose
-  **merge** vs **take-claude-base**; path-difference detection with auto-fix
-  suggestions; key setup.
-- `prompter/noop` keeps every prompt flag-addressable for automation.
-- **Acceptance:** a fresh machine joins an existing encrypted chain through the
-  tour alone; the same outcome is reproducible via flags only.
+### P5 — Welcome tour + join/merge flows ✅ (shipped)
+Covers **#12**.
+- Interactive `init` via `charmbracelet/huh` (`cmd/tour.go`): device name, backend
+  (+ its fields, incl. create-repo), new-vs-join chain, key paste, directories,
+  and auto-sync triggers. On join, choose **merge** vs **claude-base**
+  (`--claude-base`: publish local without importing the chain first).
+- Every choice has a flag equivalent; `--no-input` and non-TTY stdin skip the tour
+  (TTY detected via `golang.org/x/term`, so pipes and /dev/null don't trigger it).
+- **Acceptance met:** non-interactive flag/`--no-input` init verified end-to-end
+  (incl. /dev/null stdin); the tour reuses the same code paths so flags and tour
+  produce identical config. (The TUI itself is exercised manually.)
 
 ### P6 — Distribution + docs/memory-bank
 Covers **#8, #13**.

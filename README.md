@@ -74,7 +74,9 @@ cd claude-code-sync && make install
 1. Create a **private** repo to hold the data, e.g. `claude-sessions` — or let
    ccsync create one for you with `--create-repo claude-sessions` (needs the
    `gh` CLI).
-2. On your first machine, start a new encrypted chain:
+2. On your first machine, run `ccsync init`. In a terminal it launches an
+   interactive **welcome tour** (backend, new-vs-join chain, directories,
+   auto-sync). Prefer flags? Pass them (or `--no-input` to skip the tour):
 
    ```sh
    ccsync init --repo git@github.com:you/claude-sessions.git \
@@ -97,6 +99,9 @@ cd claude-code-sync && make install
    ```
 
    Transfer the identity over a trusted channel (AirDrop, a password manager).
+   When joining, the tour asks how to reconcile: **merge** (combine this machine's
+   history with the chain) or **claude-base** (publish this machine's history
+   without importing the chain's yet — `--claude-base`).
 
 4. From then on:
 
