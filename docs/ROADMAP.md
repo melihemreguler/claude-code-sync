@@ -98,20 +98,22 @@ Each phase ends with a green `/code-review` (high) and updated docs/tests.
 Empty-include safety, content-equality sync, glob validation, pull-before-mutate,
 `.gitignore`, status platform.
 
-### P1 — Hexagonal core + canonical keys + path translation
+### P1 — Hexagonal core + canonical keys + path translation ✅ (shipped)
 Covers business reqs **#2, #3, #6, #7**.
-- Introduce `domain`, `ports`, `app`; move the existing engine behind ports.
-- Repo layout becomes `manifest` + `objects/<projectKey>/<sessionId>` instead of a
-  raw folder mirror.
-- `ProjectKey`: derive a stable id per project (e.g. repo basename + content
-  salt), independent of absolute path.
-- `PathMapping` per device resolves `ProjectKey ↔ local ~/.claude folder name`,
-  handling `/dev/github` vs `/github` and differing usernames/home dirs.
-- `filter add/remove` accept **paths**, not globs; pattern logic is internal (#3).
-- `device list` shows each device's included/excluded project selections (#6),
-  read from the (decrypted) manifest.
-- **Acceptance:** two devices with different project paths + usernames sync the
-  same logical sessions and `claude --resume` finds them on both.
+- `internal/domain` (pure rules), `internal/ports` (interfaces),
+  `internal/adapters` (claudefs, gitstore, gitident, nocrypto),
+  `internal/app` (use cases). A `Crypto` passthrough port is already in place so
+  P2 is a drop-in.
+- Storage layout is `manifest` + `objects/<keyHash>/…` instead of a folder mirror.
+- Canonical key = normalized git remote, else a home-relative path fallback. The
+  true working dir is read from the session file's `cwd` (folder names are lossy).
+- Per-device folder mapping in the manifest translates each project to this
+  machine's folder on pull; a project is materialized only once it exists locally.
+- `filter` accepts **directory paths**, not globs (#3). `device list` shows each
+  device's include/exclude roots (#6).
+- **Acceptance met:** verified two devices with the same repo at different paths
+  (`~/dev/github/widgets` vs `~/github/widgets`) cross-sync into each device's own
+  folder, with unit + end-to-end tests.
 
 ### P2 — Encryption + keychain
 Covers **#9** (+ metadata protection).

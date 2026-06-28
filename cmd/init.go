@@ -4,9 +4,8 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/melihemreguler/claude-code-sync/internal/app"
 	"github.com/melihemreguler/claude-code-sync/internal/config"
-	"github.com/melihemreguler/claude-code-sync/internal/registry"
-	"github.com/melihemreguler/claude-code-sync/internal/syncer"
 	"github.com/spf13/cobra"
 )
 
@@ -25,7 +24,9 @@ var initCmd = &cobra.Command{
 	Long: `Initialize this device: write the local config, clone the data repo, register
 the device in the chain, and run a first sync.
 
-Create a PRIVATE git repo to hold the session data and pass its URL with --repo.`,
+Create a PRIVATE git repo to hold the session data and pass its URL with --repo.
+Choose which projects sync by directory with --include / --exclude (paths, not
+patterns). An empty include list syncs nothing.`,
 	Args: cobra.NoArgs,
 	RunE: runInit,
 }
@@ -34,8 +35,8 @@ func init() {
 	f := initCmd.Flags()
 	f.StringVar(&initRepo, "repo", "", "git URL of the PRIVATE data repo (required)")
 	f.StringVar(&initDevice, "device", "", "device name (default: hostname)")
-	f.StringSliceVar(&initInclude, "include", []string{"*github*"}, "include globs (comma-separated)")
-	f.StringSliceVar(&initExclude, "exclude", nil, "exclude globs (comma-separated)")
+	f.StringSliceVar(&initInclude, "include", nil, "directory roots to sync (repeatable)")
+	f.StringSliceVar(&initExclude, "exclude", nil, "directory roots to keep local (repeatable)")
 	f.StringVar(&initClaudeDir, "claude-dir", config.DefaultClaudeDir(), "Claude Code home directory")
 	f.StringVar(&initWorkDir, "work-dir", config.DefaultWorkDir(), "local clone location for the data repo")
 	_ = initCmd.MarkFlagRequired("repo")
@@ -55,27 +56,15 @@ func runInit(_ *cobra.Command, _ []string) error {
 		RepoURL:   initRepo,
 		ClaudeDir: initClaudeDir,
 		WorkDir:   initWorkDir,
-		Include:   initInclude,
-		Exclude:   initExclude,
+		Include:   resolveRoots(initInclude),
+		Exclude:   resolveRoots(initExclude),
 	}
 	if err := config.Save(cfg); err != nil {
 		return err
 	}
 
-	s := syncer.New(cfg)
-	if err := s.EnsureRepo(); err != nil {
-		return err
-	}
-	if err := s.SeedRepo(); err != nil {
-		return err
-	}
-
-	reg, err := registry.Load(cfg.WorkDir)
-	if err != nil {
-		return err
-	}
-	reg.Upsert(cfg.Device, config.Platform())
-	if err := reg.Save(cfg.WorkDir); err != nil {
+	s := app.New(cfg)
+	if err := s.EnsureReady(); err != nil {
 		return err
 	}
 
@@ -83,6 +72,9 @@ func runInit(_ *cobra.Command, _ []string) error {
 	fmt.Printf("  data repo: %s\n", cfg.RepoURL)
 	fmt.Printf("  include:   %v\n", cfg.Include)
 	fmt.Printf("  exclude:   %v\n", cfg.Exclude)
+	if len(cfg.Include) == 0 {
+		fmt.Fprintln(os.Stderr, "warning: include list is empty — nothing will sync. Add a path with `ccsync filter add --include <dir>`.")
+	}
 	fmt.Println("Running first sync …")
 
 	in, out, err := s.Sync()

@@ -4,122 +4,107 @@ Selective, multi-device sync for [Claude Code](https://www.claude.com/product/cl
 
 Claude Code keeps your conversation history **locally** in `~/.claude/projects/` and
 does not sync it across machines (unlike the claude.ai web history). `ccsync` mirrors
-those session files between your devices through a git repository you control — but
-only the projects **you choose**.
+those session files between your devices through a storage backend you control —
+but only the projects **you choose**, and it works even when the same project lives
+at different paths on different machines.
 
 ## Why this exists
 
 There are several "sync everything in `~/.claude`" tools already. This one is built
-around two requirements the others don't cleanly cover:
+around requirements the others don't cleanly cover:
 
 1. **A device control panel.** Devices form an explicit chain you can list and
-   remove from (`ccsync device list` / `device remove`). The chain lives in the
-   synced repo so every machine sees the same roster.
-2. **Path-selective sync.** You sync sessions under *specific* project paths and
-   leave the rest alone. Claude stores each project under a folder whose name
-   embeds the full path (e.g. `-Users-me-dev-github-foo`), so a glob like
-   `*github*` syncs everything under `~/dev/github` while your work repos
-   (e.g. `*turknet*`) never leave the machine.
-
-Cloud transport is just a git remote (a **private** GitHub repo), so there's no
-extra service to run and the data sits where you already trust your code.
+   remove from (`ccsync device list` / `device remove`), and the list shows which
+   directories each device syncs.
+2. **Path-selective sync.** You choose which projects sync **by directory**
+   (`--include ~/dev/github`), not by cryptic patterns. Work repositories under
+   another root stay on the machine.
+3. **Path-independent identity.** The same git project is recognized across
+   machines by its **git remote**, not its folder path. So `~/dev/github/app` on
+   one Mac and `~/github/app` on another — even under different usernames — sync as
+   the same logical project, each landing in that machine's own folder so
+   `claude --resume` finds it.
 
 ## How it works
 
+Each project is stored under a **canonical key** (its normalized git remote, or a
+home-relative path fallback). A synced, per-device **manifest** maps that key to the
+folder name each machine uses, so sessions are translated to the right place on pull.
+
 ```
-  device A  ──push──▶  ┌──────────────────────┐  ◀──pull──  device B
-  ~/.claude/projects   │  private git repo     │   ~/.claude/projects
-                       │  ├── devices.json     │
-   filter: *github*    │  └── projects/        │   filter: *github*
-                       │      └── <matching>/  │
-                       └──────────────────────┘
+  device A                 ┌────────────────────────┐                device B
+  ~/.claude/projects       │  storage backend (git)  │       ~/.claude/projects
+   include: ~/dev/github   │  ├── manifest           │   include: ~/github
+                           │  └── objects/<key>/...  │
+   ~/dev/github/app  ──────┤                         ├──────▶  ~/github/app
+        (git remote = github.com/you/app on both → same canonical key)
 ```
 
-- `pull` rebases the repo, then copies any **newer** session files into `~/.claude`.
-- `push` copies your matching local sessions into the repo, records this device in
-  `devices.json`, commits, and pushes (auto-rebasing once if the remote moved).
-- Session logs (`*.jsonl`) are configured for git **union-merge**, so concurrent
-  appends from two devices merge instead of conflicting.
-- Sync is **additive**: `ccsync` never deletes session files. Excluded projects are
-  never copied into the repo at all.
+- `pull` integrates the backend, then copies each project's objects into **this
+  device's** folder for that canonical key.
+- `push` copies your selected local sessions into `objects/<key>/`, records this
+  device and its folder mapping in the manifest, and publishes.
+- Sync is **additive**: it never deletes session files. Excluded projects never
+  reach storage.
 
-> ⚠️ **Path matching is your responsibility.** Sessions are keyed by absolute path.
-> If two machines use the same username and clone repos to the same location, the
-> folder names match and `claude --resume` finds the synced sessions. If your paths
-> differ across machines, the sessions still sync but appear under different project
-> folders.
->
-> ⚠️ **Keep the data repo private.** It contains your full conversation history,
-> including code and command output. Do not add work machines with confidential
-> code unless your employer's policy allows it.
+> ⚠️ **Keep the storage backend private.** It contains your conversation history —
+> code, command output, and (until encryption lands in a later phase) project
+> paths. Don't add machines with confidential code unless policy allows it.
 
 ## Install
 
 ```sh
-go install github.com/melihemreguler/claude-code-sync@latest
-# the binary is named `ccsync`
+go install github.com/melihemreguler/claude-code-sync@latest   # binary: ccsync
 ```
 
 Or build from source:
 
 ```sh
 git clone https://github.com/melihemreguler/claude-code-sync
-cd claude-code-sync
-make install   # builds ./ccsync and copies it to $GOPATH/bin
+cd claude-code-sync && make install
 ```
 
 ## Quick start
 
-1. Create a **private** repo on GitHub to hold the data, e.g. `claude-sessions`.
+1. Create a **private** repo to hold the data, e.g. `claude-sessions`.
 2. On your first machine:
-
-   ```sh
-   ccsync init --repo git@github.com:you/claude-sessions.git --device macbook-personal
-   ```
-
-   `--include` defaults to `*github*`. Override it if your projects live elsewhere:
 
    ```sh
    ccsync init --repo git@github.com:you/claude-sessions.git \
      --device macbook-personal \
-     --include '*github*,*personal*' \
-     --exclude '*turknet*,*work*'
+     --include ~/dev/github
    ```
 
-3. On every other machine, run the same `init` with a different `--device` name.
-   The first sync pulls everything already in the repo.
+   Add more roots with repeated `--include`, and carve out exceptions with
+   `--exclude ~/dev/github/work`. An empty include list syncs nothing.
 
-4. From then on, just run:
+3. On every other machine, run `init` with a different `--device` name and that
+   machine's own include path(s).
+
+4. From then on:
 
    ```sh
-   ccsync sync
+   ccsync sync     # pull, then push
    ```
-
-   (Pull, then push.) Wire it into a shell alias, a `cron`/`launchd` job, or run it
-   by hand before and after a session.
 
 ## Commands
 
 | Command | What it does |
 |---|---|
-| `ccsync init --repo <url>` | Set up this device, clone the data repo, first sync |
+| `ccsync init --repo <url>` | Set up this device, clone storage, first sync |
 | `ccsync sync` | Pull remote changes, then push local ones |
-| `ccsync pull` | Apply remote sessions into `~/.claude` |
-| `ccsync push` | Send local sessions to the remote |
-| `ccsync status` | Show config, which projects sync/skip, and the device chain |
-| `ccsync device list` | Show the device chain (the control panel) |
+| `ccsync pull` / `push` | One direction only |
+| `ccsync status` | Config, which projects sync/skip (with cwd + key), device chain |
+| `ccsync device list` | The chain, plus each device's include/exclude dirs |
 | `ccsync device remove <name>` | Drop a device from the chain |
-| `ccsync filter list` | Show include/exclude patterns |
-| `ccsync filter add --include <glob>` | Add an include pattern |
-| `ccsync filter add --exclude <glob>` | Add an exclude pattern |
-| `ccsync filter remove --include/--exclude <glob>` | Remove a pattern |
-
-Filters use shell-style globs (`path.Match`) against project **folder names**.
-Run `ccsync status` to preview exactly what will and won't sync.
+| `ccsync filter list` | Show include/exclude directory roots |
+| `ccsync filter add --include <dir>` / `--exclude <dir>` | Add a root |
+| `ccsync filter remove --include/--exclude <dir>` | Remove a root |
 
 ## Configuration
 
-Per-machine config lives at `~/.config/ccsync/config.json` and is **not** synced:
+Per-machine config lives at `~/.config/ccsync/config.json` (not synced; honors
+`CCSYNC_*` env overrides):
 
 ```json
 {
@@ -127,25 +112,32 @@ Per-machine config lives at `~/.config/ccsync/config.json` and is **not** synced
   "repoUrl": "git@github.com:you/claude-sessions.git",
   "claudeDir": "/Users/you/.claude",
   "workDir": "/Users/you/.local/share/ccsync/repo",
-  "include": ["*github*"],
+  "include": ["~/dev/github"],
   "exclude": []
 }
 ```
 
 ## Caveats
 
-- **An empty include list syncs nothing.** This is deliberate: removing your last
-  include pattern should never silently start syncing every project. Use an
-  explicit `*` pattern to include everything.
-- **Don't run the same session on two machines at once.** Sync compares file
-  content (and, as a tiebreaker, modification time) to decide what is newer.
-  Because git does not preserve modification times, this heuristic is reliable
-  for sequential use but can mis-order genuinely concurrent edits to the *same*
-  live session. Union-merge of `*.jsonl` is the backstop. Sync between sessions,
-  not during. (A content-addressed sync engine that removes this caveat is
-  planned — see the roadmap.)
-- `ccsync` syncs files; it does not migrate paths. See the path note above.
-- This is not an official Anthropic product.
+- **An empty include list syncs nothing** — deliberate, so you never start syncing
+  work repos by accident.
+- **A project must be opened on a device before foreign history lands there.**
+  ccsync only knows a device's folder for a project once that project has a local
+  session; until then the data waits safely in storage.
+- **Projects without a git remote** fall back to a home-relative path key, which
+  does not auto-translate across structurally different layouts (e.g.
+  `~/dev/github` vs `~/github`). Git-backed projects always do.
+- **Don't run the same session on two machines at once.** Sync compares content
+  (and mtime as a tiebreaker); concurrent edits to one live session are best
+  avoided. Encryption + a content-addressed engine are on the roadmap.
+- Not an official Anthropic product.
+
+## Architecture & roadmap
+
+`ccsync` follows a hexagonal layout (`internal/domain` rules, `internal/ports`
+interfaces, `internal/adapters` implementations, `internal/app` use cases). See
+[docs/ROADMAP.md](docs/ROADMAP.md) for the phase plan and design decisions
+(encryption, storage providers, auto-sync, the welcome tour, and more).
 
 ## License
 
