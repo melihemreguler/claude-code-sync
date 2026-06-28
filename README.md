@@ -71,7 +71,9 @@ cd claude-code-sync && make install
 
 ## Quick start
 
-1. Create a **private** repo to hold the data, e.g. `claude-sessions`.
+1. Create a **private** repo to hold the data, e.g. `claude-sessions` — or let
+   ccsync create one for you with `--create-repo claude-sessions` (needs the
+   `gh` CLI).
 2. On your first machine, start a new encrypted chain:
 
    ```sh
@@ -101,6 +103,22 @@ cd claude-code-sync && make install
    ```sh
    ccsync sync     # pull, then push
    ```
+
+## Storage backends
+
+The backend is pluggable (`--backend`). Whichever you pick, content is encrypted
+before it leaves your machine.
+
+- **git** (default) — a private git repo. `--repo <url>`, or `--create-repo <name>`
+  to make a private GitHub repo via the `gh` CLI.
+- **s3** — an S3 (or S3-compatible) bucket: `--backend s3 --s3-bucket <b>
+  [--s3-prefix ccsync] [--s3-region <r>]`. Credentials come from the standard AWS
+  config chain (env, shared config, IAM role).
+- **gdrive** — a Google Drive folder: `--backend gdrive --gdrive-folder <id>
+  --gdrive-credentials <oauth-client.json>`. First use runs a one-time browser
+  consent; the token is cached locally. Uses the least-privilege `drive.file` scope.
+
+All devices in a chain must use the same backend and target.
 
 ## Commands
 
@@ -154,6 +172,9 @@ keychain.
 - **Don't run the same session on two machines at once.** Sync compares content
   (and a stored modification time as a tiebreaker); concurrent edits to one live
   session are best avoided. A content-addressed merge engine is on the roadmap.
+- **Avoid simultaneous syncs on S3/Drive backends.** The git backend rebases on
+  conflict, but blob backends update the manifest last-writer-wins; a metadata
+  race self-heals on the next sync but is best avoided. A lock is planned.
 - Not an official Anthropic product.
 
 ## Architecture & roadmap

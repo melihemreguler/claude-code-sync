@@ -21,8 +21,20 @@ var ErrNotInitialized = errors.New("not initialized — run `ccsync init` first"
 type Config struct {
 	// Device is this machine's unique name in the sync chain.
 	Device string `mapstructure:"device" json:"device"`
-	// RepoURL is the git remote holding the synced session data. Keep it PRIVATE.
+	// Backend selects the storage provider: "git" (default), "s3", or "gdrive".
+	Backend string `mapstructure:"backend" json:"backend"`
+	// RepoURL is the git remote holding the synced session data (git backend).
+	// Keep it PRIVATE.
 	RepoURL string `mapstructure:"repoUrl" json:"repoUrl"`
+	// S3 backend settings.
+	S3Bucket string `mapstructure:"s3Bucket" json:"s3Bucket,omitempty"`
+	S3Prefix string `mapstructure:"s3Prefix" json:"s3Prefix,omitempty"`
+	S3Region string `mapstructure:"s3Region" json:"s3Region,omitempty"`
+	// Google Drive backend settings. CredentialsPath points to an OAuth client
+	// secret JSON; TokenPath caches the user's authorization.
+	GDriveFolderID    string `mapstructure:"gdriveFolderId" json:"gdriveFolderId,omitempty"`
+	GDriveCredentials string `mapstructure:"gdriveCredentials" json:"gdriveCredentials,omitempty"`
+	GDriveToken       string `mapstructure:"gdriveToken" json:"gdriveToken,omitempty"`
 	// ChainID is the age recipient (public key) of the sync chain. It identifies
 	// which secret identity to load from the keychain; it is not itself secret.
 	ChainID string `mapstructure:"chainId" json:"chainId"`
@@ -127,8 +139,15 @@ func Save(c *Config) error {
 
 	v := viper.New()
 	v.Set("device", c.Device)
+	v.Set("backend", c.Backend)
 	v.Set("repoUrl", c.RepoURL)
 	v.Set("chainId", c.ChainID)
+	v.Set("s3Bucket", c.S3Bucket)
+	v.Set("s3Prefix", c.S3Prefix)
+	v.Set("s3Region", c.S3Region)
+	v.Set("gdriveFolderId", c.GDriveFolderID)
+	v.Set("gdriveCredentials", c.GDriveCredentials)
+	v.Set("gdriveToken", c.GDriveToken)
 	v.Set("claudeDir", c.ClaudeDir)
 	v.Set("workDir", c.WorkDir)
 	v.Set("include", c.Include)

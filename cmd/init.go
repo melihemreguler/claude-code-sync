@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/melihemreguler/claude-code-sync/internal/adapters/agecrypto"
+	"github.com/melihemreguler/claude-code-sync/internal/adapters/ghcli"
 	"github.com/melihemreguler/claude-code-sync/internal/adapters/keychain"
 	"github.com/melihemreguler/claude-code-sync/internal/app"
 	"github.com/melihemreguler/claude-code-sync/internal/config"
@@ -14,15 +15,23 @@ import (
 )
 
 var (
-	initRepo      string
-	initDevice    string
-	initClaudeDir string
-	initWorkDir   string
-	initInclude   []string
-	initExclude   []string
-	initNewChain  bool
-	initJoin      bool
-	initKey       string
+	initRepo         string
+	initDevice       string
+	initClaudeDir    string
+	initWorkDir      string
+	initInclude      []string
+	initExclude      []string
+	initNewChain     bool
+	initJoin         bool
+	initKey          string
+	initBackend      string
+	initCreateRepo   string
+	initS3Bucket     string
+	initS3Prefix     string
+	initS3Region     string
+	initGDriveFolder string
+	initGDriveCreds  string
+	initGDriveToken  string
 )
 
 var initCmd = &cobra.Command{
@@ -43,7 +52,6 @@ patterns). An empty include list syncs nothing.`,
 
 func init() {
 	f := initCmd.Flags()
-	f.StringVar(&initRepo, "repo", "", "git URL of the PRIVATE data repo (required)")
 	f.StringVar(&initDevice, "device", "", "device name (default: hostname)")
 	f.BoolVar(&initNewChain, "new-chain", false, "generate a new encrypted chain")
 	f.BoolVar(&initJoin, "join", false, "join an existing chain (needs its identity)")
@@ -51,8 +59,21 @@ func init() {
 	f.StringSliceVar(&initInclude, "include", nil, "directory roots to sync (repeatable)")
 	f.StringSliceVar(&initExclude, "exclude", nil, "directory roots to keep local (repeatable)")
 	f.StringVar(&initClaudeDir, "claude-dir", config.DefaultClaudeDir(), "Claude Code home directory")
-	f.StringVar(&initWorkDir, "work-dir", config.DefaultWorkDir(), "local clone location for the data repo")
-	_ = initCmd.MarkFlagRequired("repo")
+	f.StringVar(&initWorkDir, "work-dir", config.DefaultWorkDir(), "local working/mirror directory")
+
+	// Backend selection.
+	f.StringVar(&initBackend, "backend", "git", "storage backend: git, s3, or gdrive")
+	// git
+	f.StringVar(&initRepo, "repo", "", "git URL of the PRIVATE data repo (git backend)")
+	f.StringVar(&initCreateRepo, "create-repo", "", "create a PRIVATE GitHub repo via gh and use it (git backend)")
+	// s3
+	f.StringVar(&initS3Bucket, "s3-bucket", "", "S3 bucket (s3 backend)")
+	f.StringVar(&initS3Prefix, "s3-prefix", "ccsync", "S3 key prefix (s3 backend)")
+	f.StringVar(&initS3Region, "s3-region", "", "S3 region (s3 backend; defaults to AWS config)")
+	// gdrive
+	f.StringVar(&initGDriveFolder, "gdrive-folder", "", "Google Drive folder ID (gdrive backend)")
+	f.StringVar(&initGDriveCreds, "gdrive-credentials", "", "path to OAuth client secret JSON (gdrive backend)")
+	f.StringVar(&initGDriveToken, "gdrive-token", "", "path to cache the OAuth token (gdrive backend)")
 }
 
 func runInit(_ *cobra.Command, _ []string) error {
@@ -71,12 +92,15 @@ func runInit(_ *cobra.Command, _ []string) error {
 
 	cfg := &config.Config{
 		Device:    name,
-		RepoURL:   initRepo,
+		Backend:   initBackend,
 		ChainID:   chainID,
 		ClaudeDir: initClaudeDir,
 		WorkDir:   initWorkDir,
 		Include:   resolveRoots(initInclude),
 		Exclude:   resolveRoots(initExclude),
+	}
+	if err := configureBackend(cfg); err != nil {
+		return err
 	}
 	if err := config.Save(cfg); err != nil {
 		return err
@@ -91,7 +115,7 @@ func runInit(_ *cobra.Command, _ []string) error {
 	}
 
 	fmt.Printf("Initialized device %q.\n", cfg.Device)
-	fmt.Printf("  data repo: %s\n", cfg.RepoURL)
+	fmt.Printf("  backend:   %s (%s)\n", cfg.Backend, backendTarget(cfg))
 	fmt.Printf("  chain:     %s\n", cfg.ChainID)
 	fmt.Printf("  include:   %v\n", cfg.Include)
 	fmt.Printf("  exclude:   %v\n", cfg.Exclude)
@@ -106,6 +130,65 @@ func runInit(_ *cobra.Command, _ []string) error {
 	}
 	fmt.Printf("Synced: %d file(s) in, %d file(s) out.\n", in.Files, out.Files)
 	return nil
+}
+
+// configureBackend validates backend-specific flags and fills cfg accordingly.
+func configureBackend(cfg *config.Config) error {
+	switch cfg.Backend {
+	case "", "git":
+		cfg.Backend = "git"
+		switch {
+		case initCreateRepo != "":
+			url, err := ghcli.CreatePrivateRepo(initCreateRepo)
+			if err != nil {
+				return err
+			}
+			fmt.Printf("Created private repo: %s\n", url)
+			cfg.RepoURL = url
+		case initRepo != "":
+			cfg.RepoURL = initRepo
+		default:
+			return fmt.Errorf("git backend needs --repo <url> or --create-repo <name>")
+		}
+	case "s3":
+		if initS3Bucket == "" {
+			return fmt.Errorf("s3 backend needs --s3-bucket")
+		}
+		cfg.S3Bucket, cfg.S3Prefix, cfg.S3Region = initS3Bucket, initS3Prefix, initS3Region
+	case "gdrive":
+		if initGDriveFolder == "" || initGDriveCreds == "" {
+			return fmt.Errorf("gdrive backend needs --gdrive-folder and --gdrive-credentials")
+		}
+		token := initGDriveToken
+		if token == "" {
+			token = defaultGDriveTokenPath()
+		}
+		cfg.GDriveFolderID = initGDriveFolder
+		cfg.GDriveCredentials = resolveRoot(initGDriveCreds)
+		cfg.GDriveToken = resolveRoot(token)
+	default:
+		return fmt.Errorf("unknown backend %q (use git, s3, or gdrive)", cfg.Backend)
+	}
+	return nil
+}
+
+func backendTarget(cfg *config.Config) string {
+	switch cfg.Backend {
+	case "s3":
+		return "s3://" + cfg.S3Bucket + "/" + cfg.S3Prefix
+	case "gdrive":
+		return "drive folder " + cfg.GDriveFolderID
+	default:
+		return cfg.RepoURL
+	}
+}
+
+func defaultGDriveTokenPath() string {
+	dir, err := config.Dir()
+	if err != nil {
+		return "gdrive-token.json"
+	}
+	return dir + "/gdrive-token.json"
 }
 
 // setupChainKey establishes this device's chain identity and returns the chain
