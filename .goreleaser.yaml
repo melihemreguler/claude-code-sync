@@ -1,0 +1,58 @@
+version: 2
+
+project_name: ccsync
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: ccsync
+    main: .
+    binary: ccsync
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w -X main.version={{ .Version }}
+
+archives:
+  - id: ccsync
+    formats:
+      - tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: "checksums.txt"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+
+homebrew_casks:
+  - name: ccsync
+    repository:
+      owner: melihemreguler
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    homepage: "https://github.com/melihemreguler/claude-code-sync"
+    description: "Selective, encrypted, multi-device sync for Claude Code session history"
+    # Unsigned downloaded binaries are quarantined by macOS; strip the attribute.
+    hooks:
+      post:
+        install: |
+          system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/ccsync"]
+
+release:
+  github:
+    owner: melihemreguler
+    name: claude-code-sync

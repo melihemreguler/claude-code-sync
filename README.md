@@ -59,12 +59,10 @@ folder name each machine uses, so sessions are translated to the right place on 
 ## Install
 
 ```sh
+brew install melihemreguler/tap/ccsync          # Homebrew (macOS)
+# or
 go install github.com/melihemreguler/claude-code-sync@latest   # binary: ccsync
-```
-
-Or build from source:
-
-```sh
+# or build from source
 git clone https://github.com/melihemreguler/claude-code-sync
 cd claude-code-sync && make install
 ```
@@ -215,9 +213,10 @@ keychain.
 ## Architecture & roadmap
 
 `ccsync` follows a hexagonal layout (`internal/domain` rules, `internal/ports`
-interfaces, `internal/adapters` implementations, `internal/app` use cases). See
-[docs/ROADMAP.md](docs/ROADMAP.md) for the phase plan and design decisions
-(encryption, storage providers, auto-sync, the welcome tour, and more).
+interfaces, `internal/adapters` implementations, `internal/app` use cases). New
+here? Start with the [memory bank](docs/memory-bank/README.md) — onboarding
+context for contributors and AI agents. See [docs/ROADMAP.md](docs/ROADMAP.md) for
+the phase plan and locked design decisions.
 
 ## License
 
