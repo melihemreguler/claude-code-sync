@@ -4,6 +4,7 @@
 package app
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io/fs"
@@ -13,10 +14,13 @@ import (
 	"time"
 
 	"github.com/melihemreguler/claude-code-sync/internal/adapters/agecrypto"
+	"github.com/melihemreguler/claude-code-sync/internal/adapters/blobstore"
 	"github.com/melihemreguler/claude-code-sync/internal/adapters/claudefs"
+	"github.com/melihemreguler/claude-code-sync/internal/adapters/gdrivestore"
 	"github.com/melihemreguler/claude-code-sync/internal/adapters/gitident"
 	"github.com/melihemreguler/claude-code-sync/internal/adapters/gitstore"
 	"github.com/melihemreguler/claude-code-sync/internal/adapters/keychain"
+	"github.com/melihemreguler/claude-code-sync/internal/adapters/s3store"
 	"github.com/melihemreguler/claude-code-sync/internal/config"
 	"github.com/melihemreguler/claude-code-sync/internal/domain"
 	"github.com/melihemreguler/claude-code-sync/internal/fileutil"
@@ -48,20 +52,47 @@ type Syncer struct {
 	exclude []string
 }
 
-// New wires the default adapters for cfg, loading the chain encryption key.
+// New wires the default adapters for cfg, loading the chain encryption key and
+// the configured storage backend.
 func New(cfg *config.Config) (*Syncer, error) {
 	home, _ := os.UserHomeDir()
 	crypto, err := buildCrypto(cfg)
 	if err != nil {
 		return nil, err
 	}
+	storage, err := buildStorage(cfg)
+	if err != nil {
+		return nil, err
+	}
 	return NewWith(cfg,
 		claudefs.New(cfg.ClaudeDir),
 		gitident.New(home),
-		gitstore.New(cfg.RepoURL, cfg.WorkDir),
+		storage,
 		crypto,
 		home,
 	), nil
+}
+
+// buildStorage selects the storage backend from config.
+func buildStorage(cfg *config.Config) (ports.Storage, error) {
+	switch cfg.Backend {
+	case "", "git":
+		return gitstore.New(cfg.RepoURL, cfg.WorkDir), nil
+	case "s3":
+		blobs, err := s3store.New(context.Background(), cfg.S3Bucket, cfg.S3Prefix, cfg.S3Region)
+		if err != nil {
+			return nil, err
+		}
+		return blobstore.NewMirror(blobs, cfg.WorkDir), nil
+	case "gdrive":
+		blobs, err := gdrivestore.New(context.Background(), cfg.GDriveFolderID, cfg.GDriveCredentials, cfg.GDriveToken)
+		if err != nil {
+			return nil, err
+		}
+		return blobstore.NewMirror(blobs, cfg.WorkDir), nil
+	default:
+		return nil, fmt.Errorf("unknown backend %q (use git, s3, or gdrive)", cfg.Backend)
+	}
 }
 
 // buildCrypto loads the chain identity from the CCSYNC_IDENTITY env override
@@ -112,29 +143,10 @@ func (s *Syncer) EnsureReady() error {
 	return s.seed()
 }
 
-// seed creates the objects directory and repo hygiene files if missing.
+// seed ensures the objects directory exists. Backend-specific hygiene (e.g. a
+// git .gitignore) is handled by the storage adapter's EnsureLocal.
 func (s *Syncer) seed() error {
-	root := s.storage.RootDir()
-	if err := os.MkdirAll(filepath.Join(root, objectsDir), 0o755); err != nil {
-		return err
-	}
-	files := map[string][]byte{
-		filepath.Join(root, objectsDir, ".gitkeep"): nil,
-		filepath.Join(root, ".gitignore"):           []byte("*" + fileutil.TmpSuffix + "\n.DS_Store\n"),
-	}
-	for path, content := range files {
-		if err := writeIfMissing(path, content); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func writeIfMissing(path string, content []byte) error {
-	if _, err := os.Stat(path); err == nil {
-		return nil
-	}
-	return os.WriteFile(path, content, 0o644)
+	return os.MkdirAll(filepath.Join(s.storage.RootDir(), objectsDir), 0o755)
 }
 
 // Sync pulls remote changes, then pushes local ones.

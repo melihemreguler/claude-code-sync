@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/melihemreguler/claude-code-sync/internal/fileutil"
 	"github.com/melihemreguler/claude-code-sync/internal/gitutil"
 )
 
@@ -24,20 +25,26 @@ func New(repoURL, workDir string) *Store {
 // RootDir returns the local working directory.
 func (s *Store) RootDir() string { return s.workDir }
 
-// EnsureLocal clones the repo into workDir if it is not already a git work tree.
+// EnsureLocal clones the repo into workDir if needed and ensures git hygiene.
 func (s *Store) EnsureLocal() error {
-	if gitutil.IsRepo(s.workDir) {
-		return nil
+	if !gitutil.IsRepo(s.workDir) {
+		if s.repoURL == "" {
+			return fmt.Errorf("no repository URL configured")
+		}
+		parent := filepath.Dir(s.workDir)
+		if err := os.MkdirAll(parent, 0o755); err != nil {
+			return err
+		}
+		fmt.Printf("Cloning %s …\n", s.repoURL)
+		if err := gitutil.Stream(parent, "clone", s.repoURL, s.workDir); err != nil {
+			return err
+		}
 	}
-	if s.repoURL == "" {
-		return fmt.Errorf("no repository URL configured")
+	ignore := filepath.Join(s.workDir, ".gitignore")
+	if _, err := os.Stat(ignore); os.IsNotExist(err) {
+		return os.WriteFile(ignore, []byte("*"+fileutil.TmpSuffix+"\n.DS_Store\n"), 0o644)
 	}
-	parent := filepath.Dir(s.workDir)
-	if err := os.MkdirAll(parent, 0o755); err != nil {
-		return err
-	}
-	fmt.Printf("Cloning %s …\n", s.repoURL)
-	return gitutil.Stream(parent, "clone", s.repoURL, s.workDir)
+	return nil
 }
 
 // RemoteHasContent reports whether the remote has any branches yet.

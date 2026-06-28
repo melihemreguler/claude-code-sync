@@ -131,13 +131,21 @@ Covers **#9** (+ metadata protection).
   tests cover seal/open, tampering, wrong-key, and no-plaintext-at-rest.
 - Note: this is a breaking change from P1's plaintext layout — re-`init` chains.
 
-### P3 — Storage strategy + providers + gh auto-create
+### P3 — Storage strategy + providers + gh auto-create ✅ (shipped)
 Covers **#10, #5**.
-- `Storage` port with `git` (default), `s3`, `gdrive` adapters.
-- `init` auto-creates a **private** repo via `gh` when present (#5); clean manual
-  fallback and clear messaging when it is not.
-- **Acceptance:** same chain works end-to-end over at least git + one non-git
-  backend selected purely by config.
+- A provider-agnostic `blobstore.BlobStore` (List/Get/Put/Exists, content-MD5
+  versions) with a `Mirror` that satisfies `ports.Storage`, so any blob backend
+  looks like the git working copy to the core.
+- Backends, selected by config: `gitstore` (default), `s3store`
+  (aws-sdk-go-v2; AWS config chain), `gdrivestore` (Drive API, least-privilege
+  `drive.file`, flat files keyed by relpath, OAuth token cached).
+- `init --create-repo` makes a private GitHub repo via `gh` (#5); git hygiene
+  moved into `gitstore`.
+- **Acceptance:** git backend verified end-to-end through the factory; the
+  Mirror engine is unit-tested with an in-memory blob fake (two mirrors = two
+  devices). S3/Drive adapters are SDK-thin and were **not** live-tested here (no
+  cloud credentials in the dev environment) — they need a real bucket/folder to
+  verify; the port + Mirror contract is the correctness anchor.
 
 ### P4 — Auto-sync triggers
 Covers **#4** (config-driven per D5).
