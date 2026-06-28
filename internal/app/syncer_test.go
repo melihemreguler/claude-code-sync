@@ -1,10 +1,12 @@
 package app_test
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"testing"
 
+	"github.com/melihemreguler/claude-code-sync/internal/adapters/agecrypto"
 	"github.com/melihemreguler/claude-code-sync/internal/adapters/claudefs"
 	"github.com/melihemreguler/claude-code-sync/internal/adapters/nocrypto"
 	"github.com/melihemreguler/claude-code-sync/internal/app"
@@ -82,6 +84,52 @@ func TestCrossDeviceTranslation(t *testing.T) {
 	}
 }
 
+// Sessions and the manifest must be ciphertext at rest in storage.
+func TestObjectsEncryptedAtRest(t *testing.T) {
+	root := t.TempDir()
+	claudeDir := t.TempDir()
+	cwd := "/Users/me/dev/github/widgets"
+	secret := "TOP-SECRET-TOKEN-12345"
+	writeSession(t, claudeDir, cwd, "s.jsonl")
+	// overwrite with secret content
+	folder := domain.EncodeCwd(cwd)
+	if err := os.WriteFile(filepath.Join(claudeDir, "projects", folder, "s.jsonl"),
+		[]byte(`{"cwd":"`+cwd+`","secret":"`+secret+`"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	idStr, _, _ := agecrypto.Generate()
+	crypto, _ := agecrypto.New(idStr)
+	cfg := &config.Config{Device: "A", ClaudeDir: claudeDir, Include: []string{"/Users/me/dev/github"}}
+	ident := fakeIdent{keys: map[string]domain.CanonicalKey{cwd: "github.com/acme/widgets"}}
+	s := app.NewWith(cfg, claudefs.New(claudeDir), ident, &fakeStorage{root: root}, crypto, "/Users/me")
+	if _, err := s.Push(); err != nil {
+		t.Fatal(err)
+	}
+
+	walkAssertNoSecret(t, root, secret)
+}
+
+func walkAssertNoSecret(t *testing.T, root, secret string) {
+	t.Helper()
+	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil || info.IsDir() {
+			return err
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		if bytes.Contains(data, []byte(secret)) {
+			t.Errorf("plaintext secret leaked into %s", path)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 // Projects outside the include roots must never reach storage.
 func TestPushRespectsIncludeRoots(t *testing.T) {
 	root := t.TempDir()
@@ -102,16 +150,10 @@ func TestPushRespectsIncludeRoots(t *testing.T) {
 	}
 
 	objects := filepath.Join(root, "objects")
-	if !dirHasFile(t, filepath.Join(objects, domain.KeyHash("github.com/acme/widgets")), "keep.jsonl") {
-		t.Error("included project should have been pushed")
+	if _, err := os.Stat(filepath.Join(objects, domain.KeyHash("github.com/acme/widgets"), "keep.jsonl.age")); err != nil {
+		t.Errorf("included project should have been pushed as an encrypted object: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(objects, domain.KeyHash("github.com/acme/secret"))); !os.IsNotExist(err) {
 		t.Error("excluded project must not reach storage")
 	}
-}
-
-func dirHasFile(t *testing.T, dir, name string) bool {
-	t.Helper()
-	_, err := os.Stat(filepath.Join(dir, name))
-	return err == nil
 }

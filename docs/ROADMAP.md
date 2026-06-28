@@ -115,13 +115,21 @@ Covers business reqs **#2, #3, #6, #7**.
   (`~/dev/github/widgets` vs `~/github/widgets`) cross-sync into each device's own
   folder, with unit + end-to-end tests.
 
-### P2 — Encryption + keychain
+### P2 — Encryption + keychain ✅ (shipped)
 Covers **#9** (+ metadata protection).
-- `crypto/age` adapter; `keystore/keychain` adapter.
-- Sync core switches to decrypt → merge → encrypt; manifest encrypted.
-- Key lifecycle: generate on new chain; import (paste/QR/AirDrop) on join.
-- **Acceptance:** a leaked remote reveals no plaintext sessions or project paths;
-  `go test` covers seal/open round-trips and a tampered-blob failure.
+- `adapters/agecrypto` (age X25519 via the `Crypto` port) and
+  `adapters/keychain` (go-keyring). Key model: one chain identity, kept in the OS
+  keychain (`CCSYNC_IDENTITY` env override for headless/CI), never in the repo.
+- Push encrypts each session object; pull decrypts. The manifest is encrypted too,
+  so project paths don't leak. Change detection uses a plaintext hash + stored
+  mtime inside the encrypted manifest (age ciphertext is non-deterministic) — this
+  also fixes the old git-checkout-mtime issue.
+- Key lifecycle: `init --new-chain` generates and prints the identity;
+  `init --join [--key]` imports it; `key show` / `key id` for transfer.
+- **Acceptance met:** verified end-to-end that the remote holds only `.age`
+  ciphertext (no secrets, cwd, or paths) and the manifest is age-encrypted; unit
+  tests cover seal/open, tampering, wrong-key, and no-plaintext-at-rest.
+- Note: this is a breaking change from P1's plaintext layout — re-`init` chains.
 
 ### P3 — Storage strategy + providers + gh auto-create
 Covers **#10, #5**.

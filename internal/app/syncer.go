@@ -6,13 +6,17 @@ package app
 import (
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
+	"time"
 
+	"github.com/melihemreguler/claude-code-sync/internal/adapters/agecrypto"
 	"github.com/melihemreguler/claude-code-sync/internal/adapters/claudefs"
 	"github.com/melihemreguler/claude-code-sync/internal/adapters/gitident"
 	"github.com/melihemreguler/claude-code-sync/internal/adapters/gitstore"
-	"github.com/melihemreguler/claude-code-sync/internal/adapters/nocrypto"
+	"github.com/melihemreguler/claude-code-sync/internal/adapters/keychain"
 	"github.com/melihemreguler/claude-code-sync/internal/config"
 	"github.com/melihemreguler/claude-code-sync/internal/domain"
 	"github.com/melihemreguler/claude-code-sync/internal/fileutil"
@@ -22,6 +26,7 @@ import (
 const (
 	objectsDir   = "objects"
 	manifestFile = "manifest"
+	objectExt    = ".age"
 )
 
 // Result tallies what a sync direction touched.
@@ -43,16 +48,36 @@ type Syncer struct {
 	exclude []string
 }
 
-// New wires the default adapters for cfg.
-func New(cfg *config.Config) *Syncer {
+// New wires the default adapters for cfg, loading the chain encryption key.
+func New(cfg *config.Config) (*Syncer, error) {
 	home, _ := os.UserHomeDir()
+	crypto, err := buildCrypto(cfg)
+	if err != nil {
+		return nil, err
+	}
 	return NewWith(cfg,
 		claudefs.New(cfg.ClaudeDir),
 		gitident.New(home),
 		gitstore.New(cfg.RepoURL, cfg.WorkDir),
-		nocrypto.Passthrough{},
+		crypto,
 		home,
-	)
+	), nil
+}
+
+// buildCrypto loads the chain identity from the CCSYNC_IDENTITY env override
+// (headless/CI) or the OS keychain, and returns an age-backed Crypto.
+func buildCrypto(cfg *config.Config) (ports.Crypto, error) {
+	if id := os.Getenv("CCSYNC_IDENTITY"); id != "" {
+		return agecrypto.New(id)
+	}
+	if cfg.ChainID == "" {
+		return nil, fmt.Errorf("no encryption key configured; run `ccsync init` first")
+	}
+	id, err := keychain.Load(cfg.ChainID)
+	if err != nil {
+		return nil, fmt.Errorf("loading chain key %q from keychain: %w", cfg.ChainID, err)
+	}
+	return agecrypto.New(id)
 }
 
 // NewWith builds a Syncer from explicit ports.
@@ -96,7 +121,6 @@ func (s *Syncer) seed() error {
 	files := map[string][]byte{
 		filepath.Join(root, objectsDir, ".gitkeep"): nil,
 		filepath.Join(root, ".gitignore"):           []byte("*" + fileutil.TmpSuffix + "\n.DS_Store\n"),
-		filepath.Join(root, ".gitattributes"):       []byte("# Session logs are append-only — union-merge concurrent edits.\n*.jsonl merge=union\n"),
 	}
 	for path, content := range files {
 		if err := writeIfMissing(path, content); err != nil {
@@ -122,8 +146,8 @@ func (s *Syncer) Sync() (in Result, out Result, err error) {
 	return in, out, err
 }
 
-// Pull integrates remote sessions into the local Claude store, translating each
-// logical project to this device's folder name.
+// Pull integrates remote sessions into the local Claude store, decrypting each
+// object and translating each logical project to this device's folder name.
 func (s *Syncer) Pull() (Result, error) {
 	if err := s.EnsureReady(); err != nil {
 		return Result{}, err
@@ -141,16 +165,13 @@ func (s *Syncer) Pull() (Result, error) {
 	}
 
 	var res Result
-	root := s.storage.RootDir()
 	for keyStr, entry := range m.Projects {
 		key := domain.CanonicalKey(keyStr)
 		folder := s.localFolderFor(key, entry, localKeys)
 		if folder == "" {
 			continue
 		}
-		src := filepath.Join(root, objectsDir, domain.KeyHash(key))
-		dst := s.store.ProjectPath(folder)
-		n, err := fileutil.CopyTree(src, dst)
+		n, err := s.pullProject(key, entry, folder)
 		if err != nil {
 			return res, err
 		}
@@ -162,7 +183,41 @@ func (s *Syncer) Pull() (Result, error) {
 	return res, nil
 }
 
-// Push copies selected local sessions into storage under their canonical keys,
+// pullProject decrypts each of a project's objects into this device's folder,
+// skipping objects that are unchanged or whose local copy is newer.
+func (s *Syncer) pullProject(key domain.CanonicalKey, entry domain.ProjectEntry, folder string) (int, error) {
+	count := 0
+	for rel, meta := range entry.Objects {
+		localPath := filepath.Join(s.store.ProjectPath(folder), filepath.FromSlash(rel))
+		if info, err := os.Stat(localPath); err == nil {
+			data, err := os.ReadFile(localPath)
+			if err != nil {
+				return count, err
+			}
+			if fileutil.HashBytes(data) == meta.Hash {
+				continue // identical content
+			}
+			if info.ModTime().UnixNano() >= meta.MTime {
+				continue // local copy is at least as new — keep it
+			}
+		}
+		sealed, err := os.ReadFile(s.objectPath(key, rel))
+		if err != nil {
+			return count, err
+		}
+		plain, err := s.crypto.Open(sealed)
+		if err != nil {
+			return count, fmt.Errorf("decrypting %s: %w", rel, err)
+		}
+		if err := fileutil.WriteFileAtomic(localPath, plain, time.Unix(0, meta.MTime)); err != nil {
+			return count, err
+		}
+		count++
+	}
+	return count, nil
+}
+
+// Push encrypts selected local sessions into storage under their canonical keys,
 // records this device and its folder mappings in the manifest, and publishes.
 func (s *Syncer) Push() (Result, error) {
 	if err := s.EnsureReady(); err != nil {
@@ -175,7 +230,6 @@ func (s *Syncer) Push() (Result, error) {
 	m.UpsertDevice(s.cfg.Device, config.Platform(), s.include, s.exclude)
 
 	var res Result
-	root := s.storage.RootDir()
 	folders, err := s.store.ListProjects()
 	if err != nil {
 		return res, err
@@ -192,9 +246,7 @@ func (s *Syncer) Push() (Result, error) {
 		if key == "" {
 			continue
 		}
-		src := s.store.ProjectPath(folder)
-		dst := filepath.Join(root, objectsDir, domain.KeyHash(key))
-		n, err := fileutil.CopyTree(src, dst)
+		n, err := s.pushProject(key, folder, m)
 		if err != nil {
 			return res, err
 		}
@@ -213,6 +265,67 @@ func (s *Syncer) Push() (Result, error) {
 		return res, err
 	}
 	return res, nil
+}
+
+// pushProject encrypts each changed local session file into storage and records
+// its metadata, skipping files that are unchanged or older than what is stored.
+func (s *Syncer) pushProject(key domain.CanonicalKey, folder string, m *domain.Manifest) (int, error) {
+	count := 0
+	projectDir := s.store.ProjectPath(folder)
+	entry := m.Projects[string(key)]
+
+	err := filepath.WalkDir(projectDir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() || strings.HasSuffix(d.Name(), fileutil.TmpSuffix) {
+			return nil
+		}
+		relOS, err := filepath.Rel(projectDir, path)
+		if err != nil {
+			return err
+		}
+		rel := filepath.ToSlash(relOS)
+
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		hash := fileutil.HashBytes(data)
+		mtime := info.ModTime().UnixNano()
+
+		if meta, ok := entry.Objects[rel]; ok {
+			if meta.Hash == hash {
+				return nil // unchanged
+			}
+			if mtime <= meta.MTime {
+				return nil // stored copy is newer — don't clobber
+			}
+		}
+
+		sealed, err := s.crypto.Seal(data)
+		if err != nil {
+			return fmt.Errorf("encrypting %s: %w", rel, err)
+		}
+		if err := fileutil.WriteFileAtomic(s.objectPath(key, rel), sealed, time.Time{}); err != nil {
+			return err
+		}
+		m.SetObject(key, rel, domain.ObjectMeta{Hash: hash, MTime: mtime})
+		count++
+		return nil
+	})
+	if os.IsNotExist(err) {
+		return count, nil
+	}
+	return count, err
+}
+
+func (s *Syncer) objectPath(key domain.CanonicalKey, rel string) string {
+	return filepath.Join(s.storage.RootDir(), objectsDir, domain.KeyHash(key), filepath.FromSlash(rel)+objectExt)
 }
 
 // resolveLocalKeys maps each local project's canonical key to its folder name so
@@ -241,9 +354,9 @@ func (s *Syncer) resolveLocalKeys() (map[domain.CanonicalKey]string, error) {
 // localFolderFor picks this device's folder for a logical project: a previously
 // recorded mapping wins, otherwise a project the device already has locally
 // (matched by canonical key). It returns "" when this device has no presence of
-// the project — in that case we do NOT materialize it, since we cannot know the
-// correct path-encoded folder name until the user opens the project here. The
-// data stays in storage and lands on the next sync once a local session exists.
+// the project — we then do NOT materialize it, since the correct path-encoded
+// folder is unknown until the user opens the project here. The data stays in
+// storage and lands on the next sync once a local session exists.
 func (s *Syncer) localFolderFor(key domain.CanonicalKey, entry domain.ProjectEntry, localKeys map[domain.CanonicalKey]string) string {
 	if f, ok := entry.Folders[s.cfg.Device]; ok {
 		return f
@@ -280,7 +393,7 @@ func (s *Syncer) loadManifest() (*domain.Manifest, error) {
 	}
 	plain, err := s.crypto.Open(data)
 	if err != nil {
-		return nil, fmt.Errorf("opening manifest: %w", err)
+		return nil, fmt.Errorf("opening manifest (wrong key?): %w", err)
 	}
 	var m domain.Manifest
 	if err := json.Unmarshal(plain, &m); err != nil {

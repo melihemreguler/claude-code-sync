@@ -24,6 +24,10 @@ around requirements the others don't cleanly cover:
    one Mac and `~/github/app` on another — even under different usernames — sync as
    the same logical project, each landing in that machine's own folder so
    `claude --resume` finds it.
+4. **End-to-end encryption.** Sessions and the manifest are encrypted with
+   [age](https://age-encryption.org) before they leave your machine. A leaked
+   remote reveals nothing — not even project paths. The chain key lives in your OS
+   keychain, never in the repo.
 
 ## How it works
 
@@ -40,16 +44,17 @@ folder name each machine uses, so sessions are translated to the right place on 
         (git remote = github.com/you/app on both → same canonical key)
 ```
 
-- `pull` integrates the backend, then copies each project's objects into **this
-  device's** folder for that canonical key.
-- `push` copies your selected local sessions into `objects/<key>/`, records this
-  device and its folder mapping in the manifest, and publishes.
+- `pull` integrates the backend, then **decrypts** each project's objects into
+  **this device's** folder for that canonical key.
+- `push` **encrypts** your selected local sessions into `objects/<key>/`, records
+  this device and its folder mapping in the (encrypted) manifest, and publishes.
+- Change detection uses a plaintext hash kept inside the encrypted manifest (age
+  ciphertext is non-deterministic), with a stored modification time for newness.
 - Sync is **additive**: it never deletes session files. Excluded projects never
   reach storage.
 
-> ⚠️ **Keep the storage backend private.** It contains your conversation history —
-> code, command output, and (until encryption lands in a later phase) project
-> paths. Don't add machines with confidential code unless policy allows it.
+> ⚠️ **Still, keep the storage backend private.** Contents are encrypted, but a
+> private backend is good defense in depth. Treat the chain key like a password.
 
 ## Install
 
@@ -67,19 +72,29 @@ cd claude-code-sync && make install
 ## Quick start
 
 1. Create a **private** repo to hold the data, e.g. `claude-sessions`.
-2. On your first machine:
+2. On your first machine, start a new encrypted chain:
 
    ```sh
    ccsync init --repo git@github.com:you/claude-sessions.git \
      --device macbook-personal \
+     --new-chain \
      --include ~/dev/github
    ```
 
-   Add more roots with repeated `--include`, and carve out exceptions with
-   `--exclude ~/dev/github/work`. An empty include list syncs nothing.
+   This prints a chain identity (a secret) — back it up. Add more roots with
+   repeated `--include`, and carve out exceptions with `--exclude ~/dev/github/work`.
+   An empty include list syncs nothing.
 
-3. On every other machine, run `init` with a different `--device` name and that
-   machine's own include path(s).
+3. On every other machine, **join** the chain with that identity:
+
+   ```sh
+   ccsync key show            # on the first machine — copies the identity
+   ccsync init --repo git@github.com:you/claude-sessions.git \
+     --device imac-home --join --include ~/github
+   # paste the identity when prompted (or pass --key)
+   ```
+
+   Transfer the identity over a trusted channel (AirDrop, a password manager).
 
 4. From then on:
 
@@ -97,6 +112,8 @@ cd claude-code-sync && make install
 | `ccsync status` | Config, which projects sync/skip (with cwd + key), device chain |
 | `ccsync device list` | The chain, plus each device's include/exclude dirs |
 | `ccsync device remove <name>` | Drop a device from the chain |
+| `ccsync key show` | Print the chain identity (secret) to join another device |
+| `ccsync key id` | Print the chain's public id (age recipient) |
 | `ccsync filter list` | Show include/exclude directory roots |
 | `ccsync filter add --include <dir>` / `--exclude <dir>` | Add a root |
 | `ccsync filter remove --include/--exclude <dir>` | Remove a root |
@@ -110,12 +127,16 @@ Per-machine config lives at `~/.config/ccsync/config.json` (not synced; honors
 {
   "device": "macbook-personal",
   "repoUrl": "git@github.com:you/claude-sessions.git",
+  "chainId": "age1… (public; the secret identity lives in the keychain)",
   "claudeDir": "/Users/you/.claude",
   "workDir": "/Users/you/.local/share/ccsync/repo",
   "include": ["~/dev/github"],
   "exclude": []
 }
 ```
+
+For headless/CI use, set `CCSYNC_IDENTITY` to the chain identity to bypass the
+keychain.
 
 ## Caveats
 
@@ -127,9 +148,12 @@ Per-machine config lives at `~/.config/ccsync/config.json` (not synced; honors
 - **Projects without a git remote** fall back to a home-relative path key, which
   does not auto-translate across structurally different layouts (e.g.
   `~/dev/github` vs `~/github`). Git-backed projects always do.
+- **Guard the chain key.** It lives in your OS keychain. If you lose it, encrypted
+  history can't be recovered; if it leaks, the chain is exposed. `ccsync key show`
+  reveals it — handle with care.
 - **Don't run the same session on two machines at once.** Sync compares content
-  (and mtime as a tiebreaker); concurrent edits to one live session are best
-  avoided. Encryption + a content-addressed engine are on the roadmap.
+  (and a stored modification time as a tiebreaker); concurrent edits to one live
+  session are best avoided. A content-addressed merge engine is on the roadmap.
 - Not an official Anthropic product.
 
 ## Architecture & roadmap
