@@ -142,7 +142,41 @@ func (s *Syncer) EnsureReady() error {
 	if err := s.storage.EnsureLocal(); err != nil {
 		return err
 	}
+	if err := s.validateRepo(); err != nil {
+		return err
+	}
 	return s.seed()
+}
+
+// validateRepo guards against pointing the data backend at the wrong place (e.g.
+// a project or the ccsync source repo instead of a dedicated data repo). It
+// refuses if the storage root holds files that aren't part of a ccsync chain.
+func (s *Syncer) validateRepo() error {
+	entries, err := os.ReadDir(s.storage.RootDir())
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	allowed := map[string]bool{
+		".git": true, ".gitignore": true, ".gitattributes": true, ".DS_Store": true,
+		"README.md": true, "LICENSE": true,
+		manifestFile: true, objectsDir: true,
+	}
+	var foreign []string
+	for _, e := range entries {
+		if !allowed[e.Name()] {
+			foreign = append(foreign, e.Name())
+		}
+	}
+	if len(foreign) > 0 {
+		return fmt.Errorf("%q does not look like a ccsync data repo (found %v).\n"+
+			"Point the backend at a dedicated, private, empty repo for session data —\n"+
+			"not your project or the ccsync source. Fix the URL, then remove %q and re-init",
+			s.storage.RootDir(), foreign, s.storage.RootDir())
+	}
+	return nil
 }
 
 // seed ensures the objects directory exists. Backend-specific hygiene (e.g. a
