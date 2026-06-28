@@ -32,6 +32,8 @@ var (
 	initGDriveFolder string
 	initGDriveCreds  string
 	initGDriveToken  string
+	initNoInput      bool
+	initClaudeBase   bool
 )
 
 var initCmd = &cobra.Command{
@@ -74,9 +76,17 @@ func init() {
 	f.StringVar(&initGDriveFolder, "gdrive-folder", "", "Google Drive folder ID (gdrive backend)")
 	f.StringVar(&initGDriveCreds, "gdrive-credentials", "", "path to OAuth client secret JSON (gdrive backend)")
 	f.StringVar(&initGDriveToken, "gdrive-token", "", "path to cache the OAuth token (gdrive backend)")
+	f.BoolVar(&initNoInput, "no-input", false, "skip the interactive welcome tour; use flags only")
+	f.BoolVar(&initClaudeBase, "claude-base", false, "on join, publish this machine's sessions without importing the chain's history first")
 }
 
 func runInit(_ *cobra.Command, _ []string) error {
+	if isInteractive() && !initNoInput {
+		if err := runTour(); err != nil {
+			return err
+		}
+	}
+
 	name := initDevice
 	if name == "" {
 		name, _ = os.Hostname()
@@ -123,12 +133,29 @@ func runInit(_ *cobra.Command, _ []string) error {
 		fmt.Fprintln(os.Stderr, "warning: include list is empty — nothing will sync. Add a path with `ccsync filter add --include <dir>`.")
 	}
 	fmt.Println("Running first sync …")
-
-	in, out, err := s.Sync()
-	if err != nil {
-		return err
+	if initJoin && initClaudeBase {
+		out, err := s.Push()
+		if err != nil {
+			return err
+		}
+		fmt.Printf("Published %d file(s); the chain's other history was not imported.\n", out.Files)
+	} else {
+		in, out, err := s.Sync()
+		if err != nil {
+			return err
+		}
+		fmt.Printf("Synced: %d file(s) in, %d file(s) out.\n", in.Files, out.Files)
 	}
-	fmt.Printf("Synced: %d file(s) in, %d file(s) out.\n", in.Files, out.Files)
+
+	// Apply any auto-sync triggers chosen in the tour.
+	if autoHooks || autoLaunchd || autoWatch {
+		if err := applyAuto(cfg, autoHooks, autoLaunchd, autoWatch, autoInterval); err != nil {
+			return err
+		}
+		if err := config.Save(cfg); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
