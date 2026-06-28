@@ -130,6 +130,32 @@ func walkAssertNoSecret(t *testing.T, root, secret string) {
 	}
 }
 
+// EnsureReady must reject a backend pointed at a non-ccsync repo (the cause of
+// an early footgun: pointing --repo at the source repo instead of a data repo).
+func TestEnsureReadyRejectsForeignRepo(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s := app.NewWith(&config.Config{Device: "A", ClaudeDir: t.TempDir()},
+		claudefs.New(t.TempDir()), fakeIdent{}, &fakeStorage{root: root}, nocrypto.Passthrough{}, "/Users/me")
+	if err := s.EnsureReady(); err == nil {
+		t.Fatal("expected EnsureReady to reject a foreign repo")
+	}
+}
+
+func TestEnsureReadyAcceptsCleanRepo(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "README.md"), []byte("tap data\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s := app.NewWith(&config.Config{Device: "A", ClaudeDir: t.TempDir()},
+		claudefs.New(t.TempDir()), fakeIdent{}, &fakeStorage{root: root}, nocrypto.Passthrough{}, "/Users/me")
+	if err := s.EnsureReady(); err != nil {
+		t.Fatalf("clean repo should be accepted: %v", err)
+	}
+}
+
 // Projects outside the include roots must never reach storage.
 func TestPushRespectsIncludeRoots(t *testing.T) {
 	root := t.TempDir()

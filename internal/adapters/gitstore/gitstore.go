@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
+	"github.com/melihemreguler/claude-code-sync/internal/domain"
 	"github.com/melihemreguler/claude-code-sync/internal/fileutil"
 	"github.com/melihemreguler/claude-code-sync/internal/gitutil"
 )
@@ -27,7 +29,11 @@ func (s *Store) RootDir() string { return s.workDir }
 
 // EnsureLocal clones the repo into workDir if needed and ensures git hygiene.
 func (s *Store) EnsureLocal() error {
-	if !gitutil.IsRepo(s.workDir) {
+	if gitutil.IsRepo(s.workDir) {
+		if err := s.checkOrigin(); err != nil {
+			return err
+		}
+	} else {
 		if s.repoURL == "" {
 			return fmt.Errorf("no repository URL configured")
 		}
@@ -45,6 +51,34 @@ func (s *Store) EnsureLocal() error {
 		return os.WriteFile(ignore, []byte("*"+fileutil.TmpSuffix+"\n.DS_Store\n"), 0o644)
 	}
 	return nil
+}
+
+// checkOrigin guards against a stale work dir: if the existing clone's origin
+// doesn't match the configured repo, we'd silently push to the wrong place.
+func (s *Store) checkOrigin() error {
+	if s.repoURL == "" {
+		return nil
+	}
+	origin, err := gitutil.Run(s.workDir, "remote", "get-url", "origin")
+	if err != nil {
+		return nil // no origin to compare against
+	}
+	if !sameRemote(origin, s.repoURL) {
+		return fmt.Errorf(
+			"work dir %s is a clone of %s, not the configured %s\nremove it to re-clone:  rm -rf %s",
+			s.workDir, origin, s.repoURL, s.workDir)
+	}
+	return nil
+}
+
+// sameRemote compares two git URLs, ignoring transport/credentials/.git.
+func sameRemote(a, b string) bool {
+	ka, oka := domain.NormalizeRemote(a)
+	kb, okb := domain.NormalizeRemote(b)
+	if oka && okb {
+		return ka == kb
+	}
+	return strings.TrimSuffix(a, ".git") == strings.TrimSuffix(b, ".git")
 }
 
 // RemoteHasContent reports whether the remote has any branches yet.

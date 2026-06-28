@@ -3,6 +3,16 @@
 All notable changes to ccsync. This project follows semantic versioning once it
 reaches its first tagged release.
 
+## [v0.1.1] — wrong-repo safeguards
+
+Fixes a footgun where ccsync could push session data to the wrong repository:
+
+- **Stale work dir guard** (`gitstore`): if the local clone's `origin` doesn't
+  match the configured repo URL, ccsync now errors with a clear "remove it to
+  re-clone" message instead of silently pushing to the old remote.
+- **Non-ccsync repo guard** (`app`): refuses to operate when the backend points at
+  something that isn't a dedicated data repo (e.g. a project or the ccsync source).
+
 ## [Unreleased]
 
 The pre-release build-up, by phase (see [docs/ROADMAP.md](docs/ROADMAP.md)):
