@@ -66,30 +66,46 @@ func tourBackend() error {
 		)).Run(); err != nil {
 			return err
 		}
-		field := huh.NewInput().Title("Git URL (git@github.com:you/claude-sessions.git)").Value(&initRepo)
+		field := huh.NewInput().Title("Git URL (git@github.com:you/claude-sessions.git)").
+			Validate(notEmpty("a git URL")).Value(&initRepo)
 		if repoMode == "create" {
-			field = huh.NewInput().Title("New repo name (e.g. claude-sessions)").Value(&initCreateRepo)
+			field = huh.NewInput().Title("New repo name (e.g. claude-sessions)").
+				Validate(notEmpty("a repo name")).Value(&initCreateRepo)
 		}
 		return huh.NewForm(huh.NewGroup(field)).Run()
 	case "s3":
 		return huh.NewForm(huh.NewGroup(
-			huh.NewInput().Title("S3 bucket").Value(&initS3Bucket),
+			huh.NewInput().Title("S3 bucket").Validate(notEmpty("a bucket")).Value(&initS3Bucket),
 			huh.NewInput().Title("Key prefix").Value(&initS3Prefix),
 			huh.NewInput().Title("Region (blank = AWS default)").Value(&initS3Region),
 		)).Run()
 	case "gdrive":
 		return huh.NewForm(huh.NewGroup(
-			huh.NewInput().Title("Drive folder ID").Value(&initGDriveFolder),
-			huh.NewInput().Title("OAuth client secret JSON path").Value(&initGDriveCreds),
+			huh.NewInput().Title("Drive folder ID").Validate(notEmpty("a folder ID")).Value(&initGDriveFolder),
+			huh.NewInput().Title("OAuth client secret JSON path").Validate(notEmpty("the credentials path")).Value(&initGDriveCreds),
 		)).Run()
 	}
 	return nil
 }
 
+// notEmpty returns a huh validator that rejects blank input.
+func notEmpty(what string) func(string) error {
+	return func(s string) error {
+		if strings.TrimSpace(s) == "" {
+			return fmt.Errorf("please enter %s", what)
+		}
+		return nil
+	}
+}
+
 func tourJoin() error {
 	mode := "merge"
 	if err := huh.NewForm(huh.NewGroup(
-		huh.NewInput().Title("Chain identity (AGE-SECRET-KEY-1…) — from `ccsync key show` on another device").Value(&initKey),
+		huh.NewInput().
+			Title("Chain identity — from `ccsync key show` on another device").
+			EchoMode(huh.EchoModePassword).
+			Validate(notEmpty("a chain identity")).
+			Value(&initKey),
 		huh.NewSelect[string]().Title("First sync").Value(&mode).Options(
 			huh.NewOption("Merge: combine this machine's history with the chain", "merge"),
 			huh.NewOption("Claude-base: publish this machine's history, don't import the chain's yet", "claude-base"),
