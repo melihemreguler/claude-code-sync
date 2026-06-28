@@ -172,6 +172,9 @@ keychain.
 - **Don't run the same session on two machines at once.** Sync compares content
   (and a stored modification time as a tiebreaker); concurrent edits to one live
   session are best avoided. A content-addressed merge engine is on the roadmap.
+- **Avoid simultaneous syncs on S3/Drive backends.** The git backend rebases on
+  conflict, but blob backends update the manifest last-writer-wins; a metadata
+  race self-heals on the next sync but is best avoided. A lock is planned.
 - Not an official Anthropic product.
 
 ## Architecture & roadmap

@@ -152,6 +152,10 @@ Covers **#4** (config-driven per D5).
 - `trigger/hook` (SessionStart/Stop), `trigger/launchd` (interval),
   `trigger/fsnotify` (debounced watcher); a sync lockfile serializes them.
 - `ccsync auto enable/disable`, with selection + interval in config.
+- **Also fold in here:** cross-device concurrency safety for blob backends — a
+  manifest-update guard (local lock + optimistic concurrency / ETag precondition
+  on S3, md5/version check on Drive) so simultaneous syncs can't clobber manifest
+  metadata. (git already rebases.)
 - **Acceptance:** enabling hooks makes a new/finished session sync with no manual
   command; concurrent triggers never corrupt state.
 
