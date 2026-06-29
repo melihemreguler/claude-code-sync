@@ -39,6 +39,29 @@ export CCSYNC_IDENTITY="$(go run filippo.io/age/cmd/age-keygen@v1.3.1 | grep AGE
 `CCSYNC_IDENTITY` bypasses the keychain; non-TTY stdin or `--no-input` skips the
 welcome tour, so `init` runs purely from flags in scripts.
 
+## Verifying the S3 / Google Drive backends (live)
+
+The blob backends are SDK-thin and can't be exercised without real credentials, so
+they ship a shared **contract test** (`blobstoretest.Run`, covering
+Put/Get/List/Exists/Delete) that runs against the in-memory reference on every CI
+build, plus **gated integration tests** that run the same contract against a real
+bucket/folder. They `t.Skip` unless their env vars are set:
+
+```sh
+# S3 (credentials from the standard AWS chain)
+CCSYNC_S3_TEST_BUCKET=my-test-bucket CCSYNC_S3_TEST_REGION=us-east-1 \
+  go test ./internal/adapters/s3store/ -run TestS3Contract -v
+
+# Google Drive (first run opens a browser consent flow; token is cached)
+CCSYNC_GDRIVE_TEST_FOLDER=<folderId> \
+CCSYNC_GDRIVE_TEST_CREDENTIALS=client_secret.json \
+  go test ./internal/adapters/gdrivestore/ -run TestGDriveContract -v
+```
+
+Use a throwaway bucket/folder — the tests write and delete `objects/contract/…`.
+For a full end-to-end check, also run `ccsync init --backend s3|gdrive …` against a
+sandbox and confirm a `sync` round-trips between two devices.
+
 ## Releasing (Homebrew)
 
 1. Create the tap repo `melihemreguler/homebrew-tap` (once).

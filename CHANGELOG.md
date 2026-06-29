@@ -2,6 +2,16 @@
 
 All notable changes to ccsync, newest first. Follows semantic versioning.
 
+## [v0.6.2] — S3/Drive verification harness
+
+- Added a shared `blobstoretest.Run` **contract test** for `BlobStore`
+  implementations (Put/Get/List/Exists/Delete), run against an in-memory reference
+  on every CI build, plus **gated live integration tests** for S3 (`TestS3Contract`)
+  and Google Drive (`TestGDriveContract`) that run the same contract against a real
+  bucket/folder when their `CCSYNC_*_TEST_*` env vars are set (skipped otherwise).
+- Added unit tests for the S3 key/prefix mapping and the Drive token-input helper.
+- Documented the live-verify recipe in `docs/memory-bank/onboarding.md`.
+
 ## [v0.6.1] — docs: refresh concurrency notes
 
 - Updated the stale "avoid simultaneous syncs on S3/Drive" guidance (README) and the
