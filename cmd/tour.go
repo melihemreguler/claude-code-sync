@@ -57,6 +57,14 @@ func runTour() error {
 func tourBackend() error {
 	switch initBackend {
 	case "git":
+		// Joining a chain means its data repo already exists — only ask for its
+		// URL. Creating a new repo only makes sense when starting a new chain.
+		if initJoin {
+			return huh.NewForm(huh.NewGroup(
+				huh.NewInput().Title("Existing chain's git URL (git@github.com:you/claude-sessions.git)").
+					Validate(notEmpty("a git URL")).Value(&initRepo),
+			)).Run()
+		}
 		repoMode := "existing"
 		if err := huh.NewForm(huh.NewGroup(
 			huh.NewSelect[string]().Title("Repository").Value(&repoMode).Options(

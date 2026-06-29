@@ -133,6 +133,7 @@ ccsync auto enable --launchd --interval 15m # periodic background sync
 ccsync auto enable --watch                 # real-time, on file change
 ccsync auto status
 ccsync auto disable                        # remove all of the above
+ccsync auto disable --watch                # or just one trigger
 ```
 
 - **hooks** add `SessionStart → pull` and `SessionEnd → push` to your Claude Code

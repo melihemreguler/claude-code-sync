@@ -2,6 +2,18 @@
 
 All notable changes to ccsync, newest first. Follows semantic versioning.
 
+## [v0.3.0] — init UX + safety
+
+- **Granular `auto disable`**: `--hooks` / `--launchd` / `--watch` disable just those
+  triggers (no flags still disables all), so the auto-sync set is fully adjustable
+  later. (The init tour's trigger picker was already multi-select — toggle with Space.)
+- **Tour fix**: joining an existing chain no longer offers "create a new repo"
+  (contradictory — the chain's data repo already exists); it asks only for that URL.
+- **Wrong-key guard on join**: init now fails fast with a clear message if the
+  provided identity can't decrypt the chain, instead of erroring later mid-sync.
+- **Public-repo guard**: init checks a GitHub data repo's visibility; a public repo
+  is refused (or, interactively, asks to confirm). Override with `--allow-public`.
+
 ## [v0.2.1] — path-traversal hardening
 
 - Pull validates each object's relative path (`fileutil.SafeJoin`) before writing,
