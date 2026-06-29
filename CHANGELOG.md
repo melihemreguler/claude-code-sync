@@ -2,6 +2,14 @@
 
 All notable changes to ccsync, newest first. Follows semantic versioning.
 
+## [v0.3.1] — device remove on blob backends
+
+- `device remove` now works on **all** backends. A `Delete` method was added to the
+  `Storage` port and `BlobStore` interface (git stages + pushes the removal; S3 uses
+  `DeleteObject`; Drive uses `Files.Delete`; the Mirror removes the blob locally and
+  remotely). Previously a removed device's manifest shard reappeared on the next sync
+  on S3/Drive because the Mirror was additive.
+
 ## [v0.3.0] — init UX + safety
 
 - **Granular `auto disable`**: `--hooks` / `--launchd` / `--watch` disable just those
