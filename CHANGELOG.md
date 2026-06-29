@@ -3,6 +3,14 @@
 All notable changes to ccsync. This project follows semantic versioning once it
 reaches its first tagged release.
 
+## [v0.1.2] — `import --all`
+
+- New `ccsync import --all` command: materializes chain projects this device has
+  never opened locally, under the originating device's folder name. An escape
+  hatch for browsing history on a fresh machine without first checking out and
+  opening each project. (`claude --resume` still keys by absolute path, so it only
+  lists imported sessions from a matching directory.)
+
 ## [v0.1.1] — wrong-repo safeguards
 
 Fixes a footgun where ccsync could push session data to the wrong repository:

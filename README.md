@@ -158,6 +158,7 @@ skip rather than collide.
 | `ccsync init --repo <url>` | Set up this device, clone storage, first sync |
 | `ccsync sync` | Pull remote changes, then push local ones |
 | `ccsync pull` / `push` | One direction only |
+| `ccsync import --all` | Also materialize chain projects not present on this device |
 | `ccsync status` | Config, which projects sync/skip (with cwd + key), device chain |
 | `ccsync device list` | The chain, plus each device's include/exclude dirs |
 | `ccsync device remove <name>` | Drop a device from the chain |
@@ -195,7 +196,10 @@ keychain.
   work repos by accident.
 - **A project must be opened on a device before foreign history lands there.**
   ccsync only knows a device's folder for a project once that project has a local
-  session; until then the data waits safely in storage.
+  session; until then the data waits safely in storage. To pull it down anyway, run
+  `ccsync import --all` — it writes those projects to disk under the originating
+  device's folder name, though `claude --resume` will only list them from a
+  matching working directory.
 - **Projects without a git remote** fall back to a home-relative path key, which
   does not auto-translate across structurally different layouts (e.g.
   `~/dev/github` vs `~/github`). Git-backed projects always do.

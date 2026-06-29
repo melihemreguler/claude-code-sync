@@ -84,6 +84,41 @@ func TestCrossDeviceTranslation(t *testing.T) {
 	}
 }
 
+// import --all materializes a project the device has never opened locally, under
+// the originating device's folder name; plain Pull leaves it alone.
+func TestImportMaterializesAbsentProjects(t *testing.T) {
+	root := t.TempDir()
+	key := domain.CanonicalKey("github.com/acme/widgets")
+
+	// Device B owns the project and pushes it to the chain.
+	claudeB := t.TempDir()
+	cwdB := "/Users/b/dev/github/widgets"
+	writeSession(t, claudeB, cwdB, "sessB.jsonl")
+	sB := newSyncer(t, "B", claudeB, "/Users/b", key, cwdB, []string{"/Users/b/dev/github"}, root)
+	if _, err := sB.Push(); err != nil {
+		t.Fatal(err)
+	}
+	folderB := domain.EncodeCwd(cwdB)
+
+	// Device A has no local presence of it.
+	claudeA := t.TempDir()
+	sA := newSyncer(t, "A", claudeA, "/Users/a", "", "", []string{"/Users/a/github"}, root)
+
+	if res, err := sA.Pull(); err != nil || res.Files != 0 {
+		t.Fatalf("plain Pull should import nothing, got %d (err %v)", res.Files, err)
+	}
+	res, err := sA.Import()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Files == 0 {
+		t.Fatal("Import should have materialized the absent project")
+	}
+	if _, err := os.Stat(filepath.Join(claudeA, "projects", folderB, "sessB.jsonl")); err != nil {
+		t.Fatalf("imported session not found under origin folder %q: %v", folderB, err)
+	}
+}
+
 // Sessions and the manifest must be ciphertext at rest in storage.
 func TestObjectsEncryptedAtRest(t *testing.T) {
 	root := t.TempDir()
