@@ -4,13 +4,68 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"time"
 
 	"github.com/melihemreguler/claude-code-sync/internal/adapters/hookcfg"
 	"github.com/melihemreguler/claude-code-sync/internal/adapters/launchd"
+	"github.com/melihemreguler/claude-code-sync/internal/adapters/systemd"
 	"github.com/melihemreguler/claude-code-sync/internal/config"
 	"github.com/spf13/cobra"
 )
+
+// agentSpec is the platform-neutral description of an auto-sync background agent.
+// installAgent translates it into a launchd (macOS) or systemd (Linux) unit.
+type agentSpec struct {
+	label       string
+	args        []string
+	intervalSec int
+	keepAlive   bool
+	logPath     string
+}
+
+// installAgent installs a background agent using the OS-native scheduler.
+func installAgent(exe string, spec agentSpec) error {
+	switch runtime.GOOS {
+	case "darwin":
+		return launchd.Install(exe, launchd.Spec{
+			Label: spec.label, Args: spec.args, IntervalSec: spec.intervalSec,
+			KeepAlive: spec.keepAlive, LogPath: spec.logPath,
+		})
+	case "linux":
+		return systemd.Install(exe, systemd.Spec{
+			Label: spec.label, Args: spec.args, IntervalSec: spec.intervalSec,
+			KeepAlive: spec.keepAlive, LogPath: spec.logPath,
+		})
+	default:
+		return fmt.Errorf("background auto-sync agents are supported on macOS and Linux only "+
+			"(this is %s); use --hooks, or run `ccsync watch` yourself", runtime.GOOS)
+	}
+}
+
+// removeAgent removes a background agent installed by installAgent.
+func removeAgent(label string) error {
+	switch runtime.GOOS {
+	case "darwin":
+		return launchd.Remove(label)
+	case "linux":
+		return systemd.Remove(label)
+	default:
+		return nil
+	}
+}
+
+// agentInstalled reports whether a background agent is installed on this OS.
+func agentInstalled(label string) bool {
+	switch runtime.GOOS {
+	case "darwin":
+		return launchd.Installed(label)
+	case "linux":
+		return systemd.Installed(label)
+	default:
+		return false
+	}
+}
 
 const (
 	syncAgentLabel  = "com.ccsync.sync"
@@ -60,7 +115,7 @@ var autoStatusCmd = &cobra.Command{
 func init() {
 	f := autoEnableCmd.Flags()
 	f.BoolVar(&autoHooks, "hooks", false, "sync on Claude Code session start/end")
-	f.BoolVar(&autoLaunchd, "launchd", false, "sync periodically via a launchd job")
+	f.BoolVar(&autoLaunchd, "launchd", false, "sync periodically in the background (launchd on macOS, systemd timer on Linux)")
 	f.BoolVar(&autoWatch, "watch", false, "sync in real time via a file watcher")
 	f.DurationVar(&autoInterval, "interval", 15*time.Minute, "interval for --launchd")
 
@@ -103,8 +158,8 @@ func applyAuto(cfg *config.Config, hooks, periodic, watch bool, interval time.Du
 		fmt.Println("enabled: Claude Code hooks (pull on session start, push on end)")
 	}
 	if periodic {
-		spec := launchd.Spec{Label: syncAgentLabel, Args: []string{"sync"}, IntervalSec: int(interval.Seconds()), LogPath: logPath}
-		if err := launchd.Install(exe, spec); err != nil {
+		spec := agentSpec{label: syncAgentLabel, args: []string{"sync"}, intervalSec: int(interval.Seconds()), logPath: logPath}
+		if err := installAgent(exe, spec); err != nil {
 			return err
 		}
 		cfg.AutoLaunchd = true
@@ -112,8 +167,8 @@ func applyAuto(cfg *config.Config, hooks, periodic, watch bool, interval time.Du
 		fmt.Printf("enabled: periodic sync every %s\n", interval)
 	}
 	if watch {
-		spec := launchd.Spec{Label: watchAgentLabel, Args: []string{"watch"}, KeepAlive: true, LogPath: logPath}
-		if err := launchd.Install(exe, spec); err != nil {
+		spec := agentSpec{label: watchAgentLabel, args: []string{"watch"}, keepAlive: true, logPath: logPath}
+		if err := installAgent(exe, spec); err != nil {
 			return err
 		}
 		cfg.AutoWatch = true
@@ -137,13 +192,13 @@ func runAutoDisable(_ *cobra.Command, _ []string) error {
 		cfg.AutoHooks = false
 	}
 	if all || disableLaunchd {
-		if err := launchd.Remove(syncAgentLabel); err != nil {
+		if err := removeAgent(syncAgentLabel); err != nil {
 			return err
 		}
 		cfg.AutoLaunchd = false
 	}
 	if all || disableWatch {
-		if err := launchd.Remove(watchAgentLabel); err != nil {
+		if err := removeAgent(watchAgentLabel); err != nil {
 			return err
 		}
 		cfg.AutoWatch = false
@@ -165,8 +220,8 @@ func runAutoStatus(_ *cobra.Command, _ []string) error {
 		return err
 	}
 	fmt.Printf("hooks:    %v\n", cfg.AutoHooks)
-	fmt.Printf("launchd:  %v (installed: %v, interval: %ds)\n", cfg.AutoLaunchd, launchd.Installed(syncAgentLabel), cfg.AutoIntervalSec)
-	fmt.Printf("watcher:  %v (installed: %v)\n", cfg.AutoWatch, launchd.Installed(watchAgentLabel))
+	fmt.Printf("periodic: %v (installed: %v, interval: %ds)\n", cfg.AutoLaunchd, agentInstalled(syncAgentLabel), cfg.AutoIntervalSec)
+	fmt.Printf("watcher:  %v (installed: %v)\n", cfg.AutoWatch, agentInstalled(watchAgentLabel))
 	return nil
 }
 

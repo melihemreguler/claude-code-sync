@@ -140,10 +140,18 @@ ccsync auto disable --watch                # or just one trigger
   `settings.json` (other hooks are preserved). These run **synchronously**, so a
   slow backend adds a little latency to session start/end — prefer **launchd** or
   **watch** if you want zero-latency, fully background syncing.
-- **launchd** installs a periodic `ccsync sync` LaunchAgent.
+- **launchd** installs a periodic `ccsync sync` background agent. On macOS this is
+  a LaunchAgent; on Linux it is a systemd **user** timer + service. (The flag is
+  named `--launchd` on both for compatibility.)
 - **watch** installs a keep-alive agent running `ccsync watch` (real-time sync,
-  batched over a short debounce window); you can also run `ccsync watch` in a
-  terminal.
+  batched over a short debounce window) — a LaunchAgent on macOS, a
+  `Restart=always` systemd user service on Linux; you can also run `ccsync watch`
+  in a terminal.
+
+> On Linux, the periodic/watch agents need a systemd user instance (`systemctl
+> --user`); enable lingering (`loginctl enable-linger <user>`) if you want them to
+> run without an active login session. On other platforms, use `--hooks` or run
+> `ccsync watch` yourself.
 
 The hook/agent commands embed the absolute path of the `ccsync` binary at enable
 time; if you move or reinstall it, run `ccsync auto enable …` again. Avoid

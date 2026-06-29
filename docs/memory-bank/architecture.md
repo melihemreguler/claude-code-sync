@@ -34,6 +34,7 @@ internal/
     nocrypto/            passthrough Crypto (tests/tooling)
     hookcfg/             Claude Code settings.json hook install/remove
     launchd/             macOS LaunchAgents (periodic sync + keep-alive watch)
+    systemd/             Linux systemd user units (periodic timer + keep-alive watch)
     ghcli/               `gh repo create` for the private data repo
 
   fileutil/              atomic writes + content hashing

@@ -2,6 +2,15 @@
 
 All notable changes to ccsync, newest first. Follows semantic versioning.
 
+## [v0.5.0] — Linux auto-sync (systemd)
+
+- Background auto-sync (`auto enable --launchd` / `--watch`) now works on **Linux**
+  via systemd **user** units: a `.timer`+`.service` for periodic sync and a
+  `Restart=always` `.service` for the watcher. macOS continues to use launchd.
+  `cmd/auto.go` selects the OS-native scheduler; the `--launchd` flag name is kept
+  for compatibility. Unsupported platforms get a clear error pointing at `--hooks`
+  or `ccsync watch`.
+
 ## [v0.4.0] — record-level session merge
 
 - Session `.jsonl` files are now merged **record-by-record** on pull instead of
