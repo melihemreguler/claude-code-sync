@@ -2,6 +2,15 @@
 
 All notable changes to ccsync, newest first. Follows semantic versioning.
 
+## [v0.6.1] — docs: refresh concurrency notes
+
+- Updated the stale "avoid simultaneous syncs on S3/Drive" guidance (README) and the
+  `blobstore.Mirror` doc comment. They predated the per-device manifest shards
+  (v0.2.0) and the record-level session merge (v0.4.0): concurrent syncs across
+  devices are now safe (disjoint shard keys, project+path-addressed objects), with
+  only a self-healing residual race when two devices push the same object at once.
+  No behavior change.
+
 ## [v0.6.0] — garbage collection
 
 - New `ccsync gc [--dry-run]`: deletes encrypted object blobs in storage that no
