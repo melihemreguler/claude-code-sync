@@ -214,7 +214,7 @@ func (s *Syncer) withLock(fn func() error) error {
 func (s *Syncer) Sync() (in Result, out Result, err error) {
 	err = s.withLock(func() error {
 		var e error
-		if in, e = s.pull(); e != nil {
+		if in, e = s.pull(false); e != nil {
 			return e
 		}
 		out, e = s.push()
@@ -228,7 +228,21 @@ func (s *Syncer) Pull() (Result, error) {
 	var res Result
 	err := s.withLock(func() error {
 		var e error
-		res, e = s.pull()
+		res, e = s.pull(false)
+		return e
+	})
+	return res, err
+}
+
+// Import is like Pull but also materializes projects this device has no local
+// presence of, under the originating device's folder name. Those land on disk but
+// — because Claude Code keys sessions by absolute path — `claude --resume` only
+// lists them from a matching working directory.
+func (s *Syncer) Import() (Result, error) {
+	var res Result
+	err := s.withLock(func() error {
+		var e error
+		res, e = s.pull(true)
 		return e
 	})
 	return res, err
@@ -246,8 +260,10 @@ func (s *Syncer) Push() (Result, error) {
 }
 
 // pull integrates remote sessions into the local Claude store, decrypting each
-// object and translating each logical project to this device's folder name.
-func (s *Syncer) pull() (Result, error) {
+// object and translating each logical project to this device's folder name. When
+// importMissing is set, projects with no local presence are also materialized
+// under the originating device's folder name.
+func (s *Syncer) pull(importMissing bool) (Result, error) {
 	if err := s.EnsureReady(); err != nil {
 		return Result{}, err
 	}
@@ -267,6 +283,9 @@ func (s *Syncer) pull() (Result, error) {
 	for keyStr, entry := range m.Projects {
 		key := domain.CanonicalKey(keyStr)
 		folder := s.localFolderFor(key, entry, localKeys)
+		if folder == "" && importMissing {
+			folder = anyFolder(entry)
+		}
 		if folder == "" {
 			continue
 		}
@@ -280,6 +299,18 @@ func (s *Syncer) pull() (Result, error) {
 		}
 	}
 	return res, nil
+}
+
+// anyFolder returns a stable (name-sorted) recorded folder for a project, used as
+// the import target on a device that has no folder of its own.
+func anyFolder(entry domain.ProjectEntry) string {
+	best := ""
+	for _, f := range entry.Folders {
+		if best == "" || f < best {
+			best = f
+		}
+	}
+	return best
 }
 
 // pullProject decrypts each of a project's objects into this device's folder,
