@@ -530,7 +530,13 @@ func (s *Syncer) refresh() error {
 
 // shardPath returns this (or a given) device's manifest shard path.
 func (s *Syncer) shardPath(device string) string {
-	return filepath.Join(s.storage.RootDir(), manifestsDir, shardFileName(device))
+	return filepath.Join(s.storage.RootDir(), filepath.FromSlash(shardRel(device)))
+}
+
+// shardRel returns a device's shard path relative to the storage root, using
+// forward slashes (the form Storage.Delete expects).
+func shardRel(device string) string {
+	return manifestsDir + "/" + shardFileName(device)
 }
 
 // shardFileName sanitizes a device name into a shard filename.

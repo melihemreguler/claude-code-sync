@@ -98,6 +98,26 @@ func (s *Store) Put(ctx context.Context, rel string, data []byte) error {
 	return nil
 }
 
+// Delete removes an object from the folder. A key that is already absent is
+// treated as success.
+func (s *Store) Delete(ctx context.Context, rel string) error {
+	id, ok := s.ids[rel]
+	if !ok {
+		if _, err := s.List(ctx); err != nil {
+			return err
+		}
+		id, ok = s.ids[rel]
+		if !ok {
+			return nil // already gone
+		}
+	}
+	if err := s.svc.Files.Delete(id).Context(ctx).Do(); err != nil {
+		return err
+	}
+	delete(s.ids, rel)
+	return nil
+}
+
 // Exists reports whether an object is present in the folder.
 func (s *Store) Exists(ctx context.Context, rel string) (bool, error) {
 	if _, ok := s.ids[rel]; ok {

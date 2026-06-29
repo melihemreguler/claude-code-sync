@@ -34,6 +34,16 @@ func (s *fakeStorage) RemoteHasContent() (bool, error) { return false, nil }
 func (s *fakeStorage) Pull() error                     { return nil }
 func (s *fakeStorage) Push(string) error               { return nil }
 func (s *fakeStorage) RootDir() string                 { return s.root }
+func (s *fakeStorage) Delete(rel string) (bool, error) {
+	p := filepath.Join(s.root, filepath.FromSlash(rel))
+	if _, err := os.Stat(p); err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, os.Remove(p)
+}
 
 func writeSession(t *testing.T, claudeDir, cwd, file string) {
 	t.Helper()
@@ -153,6 +163,39 @@ func TestImportMaterializesAbsentProjects(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(claudeA, "projects", folderB, "sessB.jsonl")); err != nil {
 		t.Fatalf("imported session not found under origin folder %q: %v", folderB, err)
+	}
+}
+
+// RemoveDevice deletes that device's shard via the Storage port and reports
+// whether anything was removed.
+func TestRemoveDeviceDeletesShard(t *testing.T) {
+	root := t.TempDir()
+	claudeA := t.TempDir()
+	cwdA := "/Users/a/dev/github/x"
+	writeSession(t, claudeA, cwdA, "a.jsonl")
+	sA := newSyncer(t, "A", claudeA, "/Users/a", "github.com/acme/x", cwdA, []string{"/Users/a/dev/github"}, root)
+	if _, err := sA.Push(); err != nil {
+		t.Fatal(err)
+	}
+	shard := filepath.Join(root, "manifests", "A.age")
+	if _, err := os.Stat(shard); err != nil {
+		t.Fatalf("shard should exist after push: %v", err)
+	}
+
+	removed, err := sA.RemoveDevice("A")
+	if err != nil || !removed {
+		t.Fatalf("RemoveDevice: removed=%v err=%v", removed, err)
+	}
+	if _, err := os.Stat(shard); !os.IsNotExist(err) {
+		t.Fatal("shard should be deleted after RemoveDevice")
+	}
+
+	removed, err = sA.RemoveDevice("ghost")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if removed {
+		t.Fatal("removing a non-existent device should report false")
 	}
 }
 

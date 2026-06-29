@@ -124,6 +124,23 @@ func (s *Store) Push(message string) error {
 	return nil
 }
 
+// Delete removes a file from the working copy. The deletion is staged and
+// published by the next Push (git add -A), which is how device removal reaches
+// the remote on the git backend. It reports whether the file existed.
+func (s *Store) Delete(rel string) (bool, error) {
+	p := filepath.Join(s.workDir, filepath.FromSlash(rel))
+	if _, err := os.Stat(p); err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	if err := os.Remove(p); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 // push sends the current branch, setting upstream on the first push.
 func (s *Store) push() error {
 	if gitutil.HasUpstream(s.workDir) {

@@ -103,6 +103,16 @@ func (s *Store) Put(ctx context.Context, rel string, data []byte) error {
 	return err
 }
 
+// Delete removes an object. Deleting a missing key is a no-op on S3, so this is
+// safe to call when the object may already be gone.
+func (s *Store) Delete(ctx context.Context, rel string) error {
+	_, err := s.client.DeleteObject(ctx, &s3.DeleteObjectInput{
+		Bucket: aws.String(s.bucket),
+		Key:    aws.String(s.key(rel)),
+	})
+	return err
+}
+
 // Exists reports whether an object is present.
 func (s *Store) Exists(ctx context.Context, rel string) (bool, error) {
 	_, err := s.client.HeadObject(ctx, &s3.HeadObjectInput{
