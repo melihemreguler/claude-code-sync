@@ -2,6 +2,7 @@ package app
 
 import (
 	"fmt"
+	"os"
 
 	"github.com/melihemreguler/claude-code-sync/internal/domain"
 )
@@ -49,11 +50,11 @@ func (s *Syncer) Manifest() (*domain.Manifest, error) {
 	if err := s.storage.EnsureLocal(); err != nil {
 		return nil, err
 	}
-	return s.loadManifest()
+	return s.loadMerged()
 }
 
-// RemoveDevice pulls the latest chain, removes a device, and publishes, under the
-// sync lock.
+// RemoveDevice drops a device from the chain by deleting its manifest shard, then
+// publishes — under the sync lock.
 func (s *Syncer) RemoveDevice(name string) (bool, error) {
 	removed := false
 	err := s.withLock(func() error {
@@ -63,14 +64,13 @@ func (s *Syncer) RemoveDevice(name string) (bool, error) {
 		if err := s.refresh(); err != nil {
 			return err
 		}
-		m, err := s.loadManifest()
-		if err != nil {
+		path := s.shardPath(name)
+		if _, err := os.Stat(path); os.IsNotExist(err) {
+			return nil // no shard → nothing to remove
+		} else if err != nil {
 			return err
 		}
-		if !m.RemoveDevice(name) {
-			return nil
-		}
-		if err := s.saveManifest(m); err != nil {
+		if err := os.Remove(path); err != nil {
 			return err
 		}
 		if err := s.storage.Push(fmt.Sprintf("device: remove %s", name)); err != nil {

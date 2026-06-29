@@ -21,7 +21,20 @@ Fixes a footgun where ccsync could push session data to the wrong repository:
 - **Non-ccsync repo guard** (`app`): refuses to operate when the backend points at
   something that isn't a dedicated data repo (e.g. a project or the ccsync source).
 
-## [Unreleased]
+## [v0.2.0] — per-device manifest shards (concurrency fix)
+
+Fixes concurrent syncs failing with a binary manifest merge conflict.
+
+- The single encrypted `manifest` blob is replaced by per-device shards under
+  `manifests/<device>.age`. Each device writes only its own shard, so two devices
+  syncing at once touch different files — git rebases cleanly instead of hitting an
+  unmergeable binary conflict.
+- Reads merge all shards (devices unioned, project folder maps unioned, per-object
+  metadata resolved by newest mtime). A legacy single `manifest` is still read as a
+  baseline, so existing chains keep working during migration.
+- `device remove` now deletes that device's shard.
+
+## [v0.1.2] — `import --all`
 
 The pre-release build-up, by phase (see [docs/ROADMAP.md](docs/ROADMAP.md)):
 

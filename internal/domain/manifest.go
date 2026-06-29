@@ -139,6 +139,36 @@ func (m *Manifest) project(key CanonicalKey) ProjectEntry {
 	return entry
 }
 
+// Merge folds other into m: union of devices (latest LastSync wins), project
+// folder mappings, and per-object metadata (latest MTime wins). It is how the
+// per-device manifest shards combine into one view.
+func (m *Manifest) Merge(other *Manifest) {
+	for _, d := range other.Devices {
+		if cur := m.FindDevice(d.Name); cur != nil {
+			if d.LastSync > cur.LastSync {
+				*cur = d
+			}
+		} else {
+			m.Devices = append(m.Devices, d)
+		}
+	}
+	for key, oe := range other.Projects {
+		e := m.project(CanonicalKey(key))
+		if oe.Display != "" {
+			e.Display = oe.Display
+		}
+		for dev, folder := range oe.Folders {
+			e.Folders[dev] = folder
+		}
+		for rel, om := range oe.Objects {
+			if cur, ok := e.Objects[rel]; !ok || om.MTime > cur.MTime {
+				e.Objects[rel] = om
+			}
+		}
+		m.Projects[key] = e
+	}
+}
+
 // SortedDevices returns devices ordered by name for stable output.
 func (m *Manifest) SortedDevices() []DeviceEntry {
 	out := append([]DeviceEntry(nil), m.Devices...)
