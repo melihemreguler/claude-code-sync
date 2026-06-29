@@ -55,6 +55,10 @@ func (s *Syncer) Manifest() (*domain.Manifest, error) {
 
 // RemoveDevice drops a device from the chain by deleting its manifest shard, then
 // publishes — under the sync lock.
+//
+// On the git backend the deletion is committed and pushed. On blob backends
+// (S3/Drive) the Mirror is additive and does not delete remote objects yet, so the
+// shard would reappear on the next sync — removal there needs a manual delete.
 func (s *Syncer) RemoveDevice(name string) (bool, error) {
 	removed := false
 	err := s.withLock(func() error {

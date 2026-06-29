@@ -84,26 +84,6 @@ func (m *Manifest) UpsertDevice(name, platform string, include, exclude []string
 	})
 }
 
-// RemoveDevice drops a device and its folder mappings, reporting whether it
-// existed.
-func (m *Manifest) RemoveDevice(name string) bool {
-	found := false
-	for i := range m.Devices {
-		if m.Devices[i].Name == name {
-			m.Devices = append(m.Devices[:i], m.Devices[i+1:]...)
-			found = true
-			break
-		}
-	}
-	for key, entry := range m.Projects {
-		if _, ok := entry.Folders[name]; ok {
-			delete(entry.Folders, name)
-			m.Projects[key] = entry
-		}
-	}
-	return found
-}
-
 // RecordProject notes that, on device, the given logical project lives in folder.
 func (m *Manifest) RecordProject(key CanonicalKey, display, device, folder string) {
 	if m.Projects == nil {
