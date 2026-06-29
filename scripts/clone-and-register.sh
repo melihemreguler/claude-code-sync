@@ -16,8 +16,12 @@
 #
 # Usage:
 #   ./clone-and-register.sh [dest_dir] [owner]
-#     dest_dir  where to clone (default: ~/github)
+#     dest_dir  where to clone (default: the current directory, $PWD)
 #     owner     GitHub owner (default: the authenticated gh user)
+#
+#   So you can just cd to where this machine keeps repos and run it, e.g.
+#     cd ~/dev/github/melihemreguler && clone-and-register.sh
+#     cd ~/github && clone-and-register.sh
 #
 # Notes:
 #   - Registration runs `claude -p` once per repo, which makes a tiny model call
@@ -26,7 +30,7 @@
 
 set -euo pipefail
 
-DEST="${1:-$HOME/github}"
+DEST="${1:-$PWD}"
 OWNER="${2:-}"
 REGISTER="${REGISTER:-1}"
 CLAUDE_PROMPT="${CLAUDE_PROMPT:-ccsync: register this project}"
