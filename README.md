@@ -222,9 +222,13 @@ keychain.
   records are preserved and the devices converge. Non-session files still use
   last-writer-wins by modification time. Running the *same live* session on two
   machines simultaneously is still best avoided.
-- **Avoid simultaneous syncs on S3/Drive backends.** The git backend rebases on
-  conflict, but blob backends update the manifest last-writer-wins; a metadata
-  race self-heals on the next sync but is best avoided. A lock is planned.
+- **Concurrent syncs are safe across devices.** The manifest is sharded per device,
+  so two machines syncing at once never clobber a shared manifest (the git backend
+  rebases; blob backends write disjoint keys), and objects are addressed by project +
+  path. The only residual race — two devices pushing the *same* session object at the
+  same instant on an S3/Drive backend — self-heals on the next sync via the manifest
+  and the record-level session merge. Each machine still serializes its own
+  overlapping triggers with a local lock.
 - Not an official Anthropic product.
 
 ## Architecture & roadmap

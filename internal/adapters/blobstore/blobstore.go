@@ -34,13 +34,16 @@ type BlobStore interface {
 // Mirror keeps a local directory in sync with a BlobStore and satisfies
 // ports.Storage.
 //
-// Concurrency note: unlike the git backend (which rebases on push rejection),
-// blob backends write last-writer-wins per key and have no transactional update.
-// Session objects are content-addressed so they never collide, but the single
-// mutable "manifest" blob can be clobbered if two devices sync at the same
-// instant — a device's just-recorded folder mapping or object metadata may be
-// dropped (it self-heals on that device's next sync). Avoid simultaneous syncs;
-// a proper lock / optimistic-concurrency update is planned (see ROADMAP P4).
+// Concurrency: blob backends write last-writer-wins per key with no transactional
+// update, but ccsync's storage layout avoids cross-device collisions. The manifest
+// is sharded per device (manifests/<device>.age), so two devices syncing at the
+// same instant write different keys instead of fighting over one manifest blob;
+// and session objects are addressed by (project, relpath), re-derived identically
+// on every device. Each key therefore has effectively a single writer. The only
+// residual race is two devices pushing the very same session object simultaneously
+// (one Put wins); the next sync reconciles it through the manifest and the
+// record-level session merge. (Per-shard manifests superseded the earlier
+// ETag/CAS plan — see ROADMAP P4.)
 type Mirror struct {
 	blobs BlobStore
 	dir   string
