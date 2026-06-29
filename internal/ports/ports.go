@@ -35,6 +35,10 @@ type Storage interface {
 	Pull() error
 	// Push commits and publishes local changes with the given message.
 	Push(message string) error
+	// Delete removes a file (slash-relative to RootDir) from the working copy and,
+	// for backends with a remote (blob stores), from the remote too. It reports
+	// whether the file existed. Git deletions are published by the next Push.
+	Delete(rel string) (bool, error)
 	// RootDir is the local working directory.
 	RootDir() string
 }

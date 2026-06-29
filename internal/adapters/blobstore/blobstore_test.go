@@ -49,6 +49,13 @@ func (m *memBlobs) Exists(_ context.Context, rel string) (bool, error) {
 	return ok, nil
 }
 
+func (m *memBlobs) Delete(_ context.Context, rel string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.data, rel)
+	return nil
+}
+
 // Two mirrors over one backend behave like two devices sharing a bucket.
 func TestMirrorRoundTripBetweenDevices(t *testing.T) {
 	blobs := newMem()
@@ -96,6 +103,55 @@ func TestMirrorPushSkipsUnchanged(t *testing.T) {
 	}
 	if blobs.puts != before {
 		t.Fatalf("expected no new puts, got %d extra", blobs.puts-before)
+	}
+}
+
+// Delete must remove the blob from the backend so a dropped device shard does
+// not reappear on another device's next pull.
+func TestMirrorDeletePropagates(t *testing.T) {
+	blobs := newMem()
+	dirA := t.TempDir()
+	a := NewMirror(blobs, dirA)
+	if err := a.EnsureLocal(); err != nil {
+		t.Fatal(err)
+	}
+	writeMirror(t, dirA, "manifests/A.age", "shardA")
+	writeMirror(t, dirA, "manifests/B.age", "shardB")
+	if err := a.Push(""); err != nil {
+		t.Fatal(err)
+	}
+
+	existed, err := a.Delete("manifests/B.age")
+	if err != nil || !existed {
+		t.Fatalf("Delete: existed=%v err=%v", existed, err)
+	}
+	if ok, _ := blobs.Exists(context.Background(), "manifests/B.age"); ok {
+		t.Fatal("B shard should be gone from the backend")
+	}
+	if _, err := os.Stat(filepath.Join(dirA, "manifests", "B.age")); !os.IsNotExist(err) {
+		t.Fatal("B shard should be gone from the local mirror")
+	}
+
+	// A second device must not receive the deleted shard on pull.
+	dirC := t.TempDir()
+	c := NewMirror(blobs, dirC)
+	if err := c.EnsureLocal(); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Pull(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dirC, "manifests", "B.age")); !os.IsNotExist(err) {
+		t.Fatal("deleted shard must not appear on another device's pull")
+	}
+	if _, err := os.Stat(filepath.Join(dirC, "manifests", "A.age")); err != nil {
+		t.Fatalf("surviving shard should still pull: %v", err)
+	}
+
+	// Deleting an absent key reports not-existed without error.
+	existed, err = a.Delete("manifests/missing.age")
+	if err != nil || existed {
+		t.Fatalf("deleting absent key: existed=%v err=%v", existed, err)
 	}
 }
 

@@ -28,6 +28,7 @@ type BlobStore interface {
 	Get(ctx context.Context, rel string) ([]byte, error)
 	Put(ctx context.Context, rel string, data []byte) error
 	Exists(ctx context.Context, rel string) (bool, error)
+	Delete(ctx context.Context, rel string) error
 }
 
 // Mirror keeps a local directory in sync with a BlobStore and satisfies
@@ -113,6 +114,26 @@ func (m *Mirror) Push(string) error {
 		}
 		return m.blobs.Put(ctx, rel, data)
 	})
+}
+
+// Delete removes a file from the local mirror and the backend. It reports
+// whether the local file existed; a missing remote blob is treated as success
+// (already gone). Used by `device remove` so a dropped shard does not reappear.
+func (m *Mirror) Delete(rel string) (bool, error) {
+	local := filepath.Join(m.dir, filepath.FromSlash(rel))
+	if _, err := os.Stat(local); err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	if err := os.Remove(local); err != nil {
+		return false, err
+	}
+	if err := m.blobs.Delete(context.Background(), rel); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func md5hex(data []byte) string {

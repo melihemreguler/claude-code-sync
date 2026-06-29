@@ -2,7 +2,6 @@ package app
 
 import (
 	"fmt"
-	"os"
 
 	"github.com/melihemreguler/claude-code-sync/internal/domain"
 )
@@ -56,9 +55,9 @@ func (s *Syncer) Manifest() (*domain.Manifest, error) {
 // RemoveDevice drops a device from the chain by deleting its manifest shard, then
 // publishes — under the sync lock.
 //
-// On the git backend the deletion is committed and pushed. On blob backends
-// (S3/Drive) the Mirror is additive and does not delete remote objects yet, so the
-// shard would reappear on the next sync — removal there needs a manual delete.
+// Deletion goes through the Storage port, so it works on every backend: the git
+// backend stages and pushes the removal, while blob backends (S3/Drive) delete
+// the remote shard directly. It returns false if the device had no shard.
 func (s *Syncer) RemoveDevice(name string) (bool, error) {
 	removed := false
 	err := s.withLock(func() error {
@@ -68,14 +67,12 @@ func (s *Syncer) RemoveDevice(name string) (bool, error) {
 		if err := s.refresh(); err != nil {
 			return err
 		}
-		path := s.shardPath(name)
-		if _, err := os.Stat(path); os.IsNotExist(err) {
-			return nil // no shard → nothing to remove
-		} else if err != nil {
+		existed, err := s.storage.Delete(shardRel(name))
+		if err != nil {
 			return err
 		}
-		if err := os.Remove(path); err != nil {
-			return err
+		if !existed {
+			return nil // no shard → nothing to remove
 		}
 		if err := s.storage.Push(fmt.Sprintf("device: remove %s", name)); err != nil {
 			return err
