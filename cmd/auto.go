@@ -22,6 +22,10 @@ var (
 	autoLaunchd  bool
 	autoWatch    bool
 	autoInterval time.Duration
+
+	disableHooks   bool
+	disableLaunchd bool
+	disableWatch   bool
 )
 
 var autoCmd = &cobra.Command{
@@ -41,7 +45,7 @@ var autoEnableCmd = &cobra.Command{
 
 var autoDisableCmd = &cobra.Command{
 	Use:   "disable",
-	Short: "Disable all auto-sync triggers",
+	Short: "Disable auto-sync triggers (all, or only the ones you pass)",
 	Args:  cobra.NoArgs,
 	RunE:  runAutoDisable,
 }
@@ -59,6 +63,12 @@ func init() {
 	f.BoolVar(&autoLaunchd, "launchd", false, "sync periodically via a launchd job")
 	f.BoolVar(&autoWatch, "watch", false, "sync in real time via a file watcher")
 	f.DurationVar(&autoInterval, "interval", 15*time.Minute, "interval for --launchd")
+
+	d := autoDisableCmd.Flags()
+	d.BoolVar(&disableHooks, "hooks", false, "disable only the hooks trigger")
+	d.BoolVar(&disableLaunchd, "launchd", false, "disable only the periodic trigger")
+	d.BoolVar(&disableWatch, "watch", false, "disable only the watcher trigger")
+
 	autoCmd.AddCommand(autoEnableCmd, autoDisableCmd, autoStatusCmd)
 }
 
@@ -117,20 +127,35 @@ func runAutoDisable(_ *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	if err := hookcfg.Remove(cfg.ClaudeDir); err != nil {
-		return err
+	// No flags → disable everything (back-compat). Any flag → only those.
+	all := !disableHooks && !disableLaunchd && !disableWatch
+
+	if all || disableHooks {
+		if err := hookcfg.Remove(cfg.ClaudeDir); err != nil {
+			return err
+		}
+		cfg.AutoHooks = false
 	}
-	if err := launchd.Remove(syncAgentLabel); err != nil {
-		return err
+	if all || disableLaunchd {
+		if err := launchd.Remove(syncAgentLabel); err != nil {
+			return err
+		}
+		cfg.AutoLaunchd = false
 	}
-	if err := launchd.Remove(watchAgentLabel); err != nil {
-		return err
+	if all || disableWatch {
+		if err := launchd.Remove(watchAgentLabel); err != nil {
+			return err
+		}
+		cfg.AutoWatch = false
 	}
-	cfg.AutoHooks, cfg.AutoLaunchd, cfg.AutoWatch = false, false, false
 	if err := config.Save(cfg); err != nil {
 		return err
 	}
-	fmt.Println("disabled all auto-sync triggers")
+	if all {
+		fmt.Println("disabled all auto-sync triggers")
+	} else {
+		fmt.Println("updated auto-sync triggers")
+	}
 	return nil
 }
 

@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/charmbracelet/huh"
 	"github.com/melihemreguler/claude-code-sync/internal/adapters/agecrypto"
 	"github.com/melihemreguler/claude-code-sync/internal/adapters/ghcli"
 	"github.com/melihemreguler/claude-code-sync/internal/adapters/keychain"
@@ -34,6 +35,7 @@ var (
 	initGDriveToken  string
 	initNoInput      bool
 	initClaudeBase   bool
+	initAllowPublic  bool
 )
 
 var initCmd = &cobra.Command{
@@ -78,6 +80,7 @@ func init() {
 	f.StringVar(&initGDriveToken, "gdrive-token", "", "path to cache the OAuth token (gdrive backend)")
 	f.BoolVar(&initNoInput, "no-input", false, "skip the interactive welcome tour; use flags only")
 	f.BoolVar(&initClaudeBase, "claude-base", false, "on join, publish this machine's sessions without importing the chain's history first")
+	f.BoolVar(&initAllowPublic, "allow-public", false, "allow a public data repo (otherwise init refuses/asks)")
 }
 
 func runInit(_ *cobra.Command, _ []string) error {
@@ -122,6 +125,14 @@ func runInit(_ *cobra.Command, _ []string) error {
 	}
 	if err := s.EnsureReady(); err != nil {
 		return err
+	}
+
+	// Joining: fail fast if the identity can't decrypt the existing chain, rather
+	// than proceeding with a wrong key and a confusing sync error later.
+	if initJoin {
+		if _, err := s.Manifest(); err != nil {
+			return fmt.Errorf("could not read this chain with the provided identity — is the key correct?\n  %w", err)
+		}
 	}
 
 	fmt.Printf("Initialized device %q.\n", cfg.Device)
@@ -174,6 +185,9 @@ func configureBackend(cfg *config.Config) error {
 			cfg.RepoURL = url
 		case initRepo != "":
 			cfg.RepoURL = initRepo
+			if err := confirmRepoVisibility(cfg.RepoURL); err != nil {
+				return err
+			}
 		default:
 			return fmt.Errorf("git backend needs --repo <url> or --create-repo <name>")
 		}
@@ -197,6 +211,34 @@ func configureBackend(cfg *config.Config) error {
 		return fmt.Errorf("unknown backend %q (use git, s3, or gdrive)", cfg.Backend)
 	}
 	return nil
+}
+
+// confirmRepoVisibility refuses (or, interactively, asks about) a public data
+// repo. Encrypted content is safe, but a public repo still leaks metadata.
+func confirmRepoVisibility(url string) error {
+	private, known := ghcli.IsPrivate(url)
+	if !known || private {
+		return nil
+	}
+	if initAllowPublic {
+		fmt.Fprintln(os.Stderr, "warning: the data repo is PUBLIC (proceeding due to --allow-public)")
+		return nil
+	}
+	if isInteractive() && !initNoInput {
+		ok := false
+		if err := huh.NewForm(huh.NewGroup(
+			huh.NewConfirm().
+				Title("This data repo is PUBLIC. Sessions are encrypted, but a public repo exposes metadata. Use it anyway?").
+				Value(&ok),
+		)).Run(); err != nil {
+			return err
+		}
+		if !ok {
+			return fmt.Errorf("aborted: point --repo at a private repo")
+		}
+		return nil
+	}
+	return fmt.Errorf("data repo %s is PUBLIC; use a private repo or pass --allow-public", url)
 }
 
 func backendTarget(cfg *config.Config) string {
