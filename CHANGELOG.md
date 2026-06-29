@@ -2,6 +2,18 @@
 
 All notable changes to ccsync, newest first. Follows semantic versioning.
 
+## [v0.4.0] — record-level session merge
+
+- Session `.jsonl` files are now merged **record-by-record** on pull instead of
+  whole-file last-writer-wins. The new `domain.MergeSessionJSONL` unions records,
+  deduping by their `uuid` (content hash for uuid-less lines). It is deterministic,
+  commutative and idempotent, so a session continued on two devices before they
+  sync keeps both sides' appended records and the devices converge. Non-session
+  files keep last-writer-wins by modification time.
+- Tests are now hermetic: the sync lock dir is injectable (`SetLockDir`) so a
+  background auto-sync on a contributor's machine no longer collides with the
+  per-user `sync.lock` during `go test`.
+
 ## [v0.3.1] — device remove on blob backends
 
 - `device remove` now works on **all** backends. A `Delete` method was added to the

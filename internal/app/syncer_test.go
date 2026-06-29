@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/melihemreguler/claude-code-sync/internal/adapters/agecrypto"
@@ -61,7 +62,9 @@ func writeSession(t *testing.T, claudeDir, cwd, file string) {
 func newSyncer(t *testing.T, device, claudeDir, home string, key domain.CanonicalKey, cwd string, include []string, root string) *app.Syncer {
 	cfg := &config.Config{Device: device, ClaudeDir: claudeDir, Include: include}
 	ident := fakeIdent{keys: map[string]domain.CanonicalKey{cwd: key}}
-	return app.NewWith(cfg, claudefs.New(claudeDir), ident, &fakeStorage{root: root}, nocrypto.Passthrough{}, home)
+	s := app.NewWith(cfg, claudefs.New(claudeDir), ident, &fakeStorage{root: root}, nocrypto.Passthrough{}, home)
+	s.SetLockDir(t.TempDir()) // hermetic: don't share the per-user sync.lock with a background ccsync
+	return s
 }
 
 // The P1 promise: the same logical project at different paths on two devices
@@ -199,6 +202,62 @@ func TestRemoveDeviceDeletesShard(t *testing.T) {
 	}
 }
 
+// A session continued differently on two devices must merge into the record
+// union on pull, rather than one device's tail clobbering the other's.
+func TestPullMergesDivergentSessions(t *testing.T) {
+	root := t.TempDir()
+	key := domain.CanonicalKey("github.com/acme/widgets")
+
+	// Device A: session s.jsonl with records r1, r2, r3.
+	claudeA := t.TempDir()
+	cwdA := "/Users/a/dev/github/widgets"
+	folderA := domain.EncodeCwd(cwdA)
+	writeSessionLines(t, claudeA, folderA, "s.jsonl",
+		sessionRec("r1", cwdA), sessionRec("r2", cwdA), sessionRec("r3", cwdA))
+	sA := newSyncer(t, "A", claudeA, "/Users/a", key, cwdA, []string{"/Users/a/dev/github"}, root)
+	if _, err := sA.Push(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Device B: SAME session (same key) but with a divergent tail r4.
+	claudeB := t.TempDir()
+	cwdB := "/Users/b/dev/github/widgets"
+	folderB := domain.EncodeCwd(cwdB)
+	writeSessionLines(t, claudeB, folderB, "s.jsonl",
+		sessionRec("r1", cwdB), sessionRec("r2", cwdB), sessionRec("r4", cwdB))
+	sB := newSyncer(t, "B", claudeB, "/Users/b", key, cwdB, []string{"/Users/b/dev/github"}, root)
+
+	if _, err := sB.Pull(); err != nil {
+		t.Fatal(err)
+	}
+
+	merged, err := os.ReadFile(filepath.Join(claudeB, "projects", folderB, "s.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`"uuid":"r1"`, `"uuid":"r2"`, `"uuid":"r3"`, `"uuid":"r4"`} {
+		if !bytes.Contains(merged, []byte(want)) {
+			t.Errorf("merged session missing %s:\n%s", want, merged)
+		}
+	}
+}
+
+func sessionRec(uuid, cwd string) string {
+	return `{"uuid":"` + uuid + `","cwd":"` + cwd + `","type":"user"}`
+}
+
+func writeSessionLines(t *testing.T, claudeDir, folder, file string, recs ...string) {
+	t.Helper()
+	dir := filepath.Join(claudeDir, "projects", folder)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	content := strings.Join(recs, "\n") + "\n"
+	if err := os.WriteFile(filepath.Join(dir, file), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // Sessions and the manifest must be ciphertext at rest in storage.
 func TestObjectsEncryptedAtRest(t *testing.T) {
 	root := t.TempDir()
@@ -218,6 +277,7 @@ func TestObjectsEncryptedAtRest(t *testing.T) {
 	cfg := &config.Config{Device: "A", ClaudeDir: claudeDir, Include: []string{"/Users/me/dev/github"}}
 	ident := fakeIdent{keys: map[string]domain.CanonicalKey{cwd: "github.com/acme/widgets"}}
 	s := app.NewWith(cfg, claudefs.New(claudeDir), ident, &fakeStorage{root: root}, crypto, "/Users/me")
+	s.SetLockDir(t.TempDir())
 	if _, err := s.Push(); err != nil {
 		t.Fatal(err)
 	}
@@ -286,6 +346,7 @@ func TestPushRespectsIncludeRoots(t *testing.T) {
 		skip: "github.com/acme/secret",
 	}}
 	s := app.NewWith(cfg, claudefs.New(claudeA), ident, &fakeStorage{root: root}, nocrypto.Passthrough{}, "/Users/a")
+	s.SetLockDir(t.TempDir())
 	if _, err := s.Push(); err != nil {
 		t.Fatal(err)
 	}

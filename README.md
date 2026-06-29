@@ -207,9 +207,12 @@ keychain.
 - **Guard the chain key.** It lives in your OS keychain. If you lose it, encrypted
   history can't be recovered; if it leaks, the chain is exposed. `ccsync key show`
   reveals it — handle with care.
-- **Don't run the same session on two machines at once.** Sync compares content
-  (and a stored modification time as a tiebreaker); concurrent edits to one live
-  session are best avoided. A content-addressed merge engine is on the roadmap.
+- **Concurrent edits to one session are merged, not lost.** Session `.jsonl`
+  files are combined record-by-record (union, deduped by record `uuid`), so if a
+  session is continued on two machines before they sync, both sides' appended
+  records are preserved and the devices converge. Non-session files still use
+  last-writer-wins by modification time. Running the *same live* session on two
+  machines simultaneously is still best avoided.
 - **Avoid simultaneous syncs on S3/Drive backends.** The git backend rebases on
   conflict, but blob backends update the manifest last-writer-wins; a metadata
   race self-heals on the next sync but is best avoided. A lock is planned.

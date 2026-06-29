@@ -46,8 +46,13 @@ content and no project paths. Object directory names are an **HMAC** of the key
 
 ## Conflict & concurrency
 
-- Per-file: content-equal → skip; else newer (by mtime) wins. Sequential use is
-  safe; concurrent edits to one live session are discouraged.
+- Session `.jsonl`: merged record-by-record on pull (union deduped by record
+  `uuid`, content hash for uuid-less lines). The merge is deterministic,
+  commutative and idempotent (base = the longer side; ties by raw bytes), so two
+  devices that diverged converge to the same file instead of one tail clobbering
+  the other. See `domain.MergeSessionJSONL`.
+- Other files: content-equal → skip; else newer (by mtime) wins. Concurrent edits
+  to one *live* session are still discouraged.
 - Same machine: a `flock` lock serializes overlapping triggers (skip, not queue).
 - Cross-device: the manifest is **sharded per device** (`manifests/<device>.age`),
   so two devices syncing at once write different files and never collide — git

@@ -4,6 +4,7 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -53,6 +54,11 @@ type Syncer struct {
 
 	include []string // cleaned, absolute include roots
 	exclude []string
+
+	// lockDir holds the sync lock file. Empty means config.Dir() (the real
+	// per-user config dir); tests inject an isolated temp dir so a background
+	// ccsync auto-sync on the developer's machine can't collide with the lock.
+	lockDir string
 }
 
 // New wires the default adapters for cfg, loading the chain encryption key and
@@ -197,9 +203,12 @@ var ErrSyncInProgress = errors.New("another sync is in progress")
 // withLock serializes mutating operations on this machine so concurrent triggers
 // (hook, launchd, watcher) never run at once. It skips rather than queues.
 func (s *Syncer) withLock(fn func() error) error {
-	dir, err := config.Dir()
-	if err != nil {
-		return err
+	dir := s.lockDir
+	if dir == "" {
+		var err error
+		if dir, err = config.Dir(); err != nil {
+			return err
+		}
 	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
@@ -319,8 +328,10 @@ func anyFolder(entry domain.ProjectEntry) string {
 	return best
 }
 
-// pullProject decrypts each of a project's objects into this device's folder,
-// skipping objects that are unchanged or whose local copy is newer.
+// pullProject decrypts each of a project's objects into this device's folder.
+// Unchanged objects are skipped. When a session log differs on both sides, the
+// two versions are merged into their record union so concurrent appends are not
+// lost; other files fall back to last-writer-wins by mtime.
 func (s *Syncer) pullProject(key domain.CanonicalKey, entry domain.ProjectEntry, folder string) (int, error) {
 	count := 0
 	for rel, meta := range entry.Objects {
@@ -328,21 +339,26 @@ func (s *Syncer) pullProject(key domain.CanonicalKey, entry domain.ProjectEntry,
 		if err != nil {
 			return count, err
 		}
-		if info, err := os.Stat(localPath); err == nil {
+
+		info, statErr := os.Stat(localPath)
+		haveLocal := statErr == nil
+		var localData []byte
+		switch {
+		case haveLocal:
 			if info.ModTime().UnixNano() == meta.MTime {
 				continue // fast path: untouched since last sync
 			}
-			data, err := os.ReadFile(localPath)
+			localData, err = os.ReadFile(localPath)
 			if err != nil {
 				return count, err
 			}
-			if fileutil.HashBytes(data) == meta.Hash {
+			if fileutil.HashBytes(localData) == meta.Hash {
 				continue // identical content
 			}
-			if info.ModTime().UnixNano() >= meta.MTime {
-				continue // local copy is at least as new — keep it
-			}
+		case !os.IsNotExist(statErr):
+			return count, statErr
 		}
+
 		sealed, err := os.ReadFile(s.objectPath(key, rel))
 		if err != nil {
 			return count, err
@@ -351,12 +367,35 @@ func (s *Syncer) pullProject(key domain.CanonicalKey, entry domain.ProjectEntry,
 		if err != nil {
 			return count, fmt.Errorf("decrypting %s: %w", rel, err)
 		}
+
+		if haveLocal {
+			if isSessionLog(rel) {
+				merged := domain.MergeSessionJSONL(localData, plain)
+				if bytes.Equal(merged, localData) {
+					continue // local already holds every remote record
+				}
+				if err := fileutil.WriteFileAtomic(localPath, merged, time.Time{}); err != nil {
+					return count, err
+				}
+				count++
+				continue
+			}
+			if info.ModTime().UnixNano() >= meta.MTime {
+				continue // non-log local copy is at least as new — keep it
+			}
+		}
 		if err := fileutil.WriteFileAtomic(localPath, plain, time.Unix(0, meta.MTime)); err != nil {
 			return count, err
 		}
 		count++
 	}
 	return count, nil
+}
+
+// isSessionLog reports whether rel is a Claude Code session transcript, the only
+// object type ccsync merges record-by-record.
+func isSessionLog(rel string) bool {
+	return strings.HasSuffix(rel, ".jsonl")
 }
 
 // push encrypts selected local sessions into storage under their canonical keys,
