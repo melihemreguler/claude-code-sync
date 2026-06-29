@@ -171,6 +171,7 @@ skip rather than collide.
 | `ccsync status` | Config, which projects sync/skip (with cwd + key), device chain |
 | `ccsync device list` | The chain, plus each device's include/exclude dirs |
 | `ccsync device remove <name>` | Drop a device from the chain |
+| `ccsync gc [--dry-run]` | Remove stored blobs no device references (e.g. after `device remove`) |
 | `ccsync auto enable/disable/status` | Manage auto-sync triggers (hooks, launchd, watcher) |
 | `ccsync watch` | Foreground real-time watcher (debounced sync) |
 | `ccsync key show` | Print the chain identity (secret) to join another device |

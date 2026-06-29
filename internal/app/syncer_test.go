@@ -258,6 +258,58 @@ func writeSessionLines(t *testing.T, claudeDir, folder, file string, recs ...str
 	}
 }
 
+// GC removes object blobs that no manifest references, keeping live ones.
+func TestGCRemovesOrphans(t *testing.T) {
+	root := t.TempDir()
+	claudeA := t.TempDir()
+	cwdA := "/Users/a/dev/github/x"
+	writeSession(t, claudeA, cwdA, "a.jsonl")
+	sA := newSyncer(t, "A", claudeA, "/Users/a", "github.com/acme/x", cwdA, []string{"/Users/a/dev/github"}, root)
+	if _, err := sA.Push(); err != nil {
+		t.Fatal(err)
+	}
+	liveObj := filepath.Join(root, "objects", domain.KeyHash("github.com/acme/x"), "a.jsonl.age")
+	if _, err := os.Stat(liveObj); err != nil {
+		t.Fatalf("live object should exist after push: %v", err)
+	}
+
+	// Plant an orphan blob under a key no manifest references.
+	orphan := filepath.Join(root, "objects", "deadbeef", "gone.jsonl.age")
+	if err := os.MkdirAll(filepath.Dir(orphan), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(orphan, []byte("orphaned ciphertext"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Dry run must not delete.
+	res, err := sA.GC(true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Orphans != 1 || res.Freed == 0 {
+		t.Fatalf("dry run should find 1 orphan with non-zero bytes, got %+v", res)
+	}
+	if _, err := os.Stat(orphan); err != nil {
+		t.Fatal("dry run must not delete the orphan")
+	}
+
+	// Real run deletes the orphan, keeps the live object.
+	res, err = sA.GC(false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Orphans != 1 {
+		t.Fatalf("expected 1 orphan removed, got %d", res.Orphans)
+	}
+	if _, err := os.Stat(orphan); !os.IsNotExist(err) {
+		t.Error("orphan should be deleted")
+	}
+	if _, err := os.Stat(liveObj); err != nil {
+		t.Errorf("live object must survive GC: %v", err)
+	}
+}
+
 // Sessions and the manifest must be ciphertext at rest in storage.
 func TestObjectsEncryptedAtRest(t *testing.T) {
 	root := t.TempDir()

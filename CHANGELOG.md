@@ -2,6 +2,14 @@
 
 All notable changes to ccsync, newest first. Follows semantic versioning.
 
+## [v0.6.0] — garbage collection
+
+- New `ccsync gc [--dry-run]`: deletes encrypted object blobs in storage that no
+  device's manifest references (e.g. the objects left behind after `device remove`).
+  Sessions still listed by any device are kept; the manifest is never pruned, and a
+  shard that fails to decrypt aborts the pass so nothing is wrongly collected.
+  Works on every backend via `Storage.Delete`.
+
 ## [v0.5.0] — Linux auto-sync (systemd)
 
 - Background auto-sync (`auto enable --launchd` / `--watch`) now works on **Linux**
