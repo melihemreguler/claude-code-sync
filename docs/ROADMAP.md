@@ -143,9 +143,11 @@ Covers **#10, #5**.
   moved into `gitstore`.
 - **Acceptance:** git backend verified end-to-end through the factory; the
   Mirror engine is unit-tested with an in-memory blob fake (two mirrors = two
-  devices). S3/Drive adapters are SDK-thin and were **not** live-tested here (no
-  cloud credentials in the dev environment) — they need a real bucket/folder to
-  verify; the port + Mirror contract is the correctness anchor.
+  devices). The S3/Drive adapters share a `blobstoretest.Run` **contract test**
+  (run against the in-memory reference in CI) plus **gated live integration tests**
+  (`TestS3Contract` / `TestGDriveContract`, skipped unless their `CCSYNC_*_TEST_*`
+  env vars are set) — see onboarding.md for the live-verify recipe. The port +
+  Mirror contract remains the correctness anchor.
 
 ### P4 — Auto-sync triggers ✅ (shipped)
 Covers **#4** (config-driven per D5).
