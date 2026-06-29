@@ -513,7 +513,13 @@ func (s *Syncer) pushProject(key domain.CanonicalKey, folder string, merged, min
 }
 
 func (s *Syncer) objectPath(key domain.CanonicalKey, rel string) string {
-	return filepath.Join(s.storage.RootDir(), objectsDir, s.crypto.HashName(string(key)), filepath.FromSlash(rel)+objectExt)
+	return filepath.Join(s.storage.RootDir(), filepath.FromSlash(s.objectRel(key, rel)))
+}
+
+// objectRel is an object's path relative to the storage root, in slash form (the
+// shape used for the live-set lookup and Storage.Delete during GC).
+func (s *Syncer) objectRel(key domain.CanonicalKey, rel string) string {
+	return objectsDir + "/" + s.crypto.HashName(string(key)) + "/" + rel + objectExt
 }
 
 // resolveLocalKeys maps each local project's canonical key to its folder name so

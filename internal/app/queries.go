@@ -2,8 +2,13 @@ package app
 
 import (
 	"fmt"
+	"io/fs"
+	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/melihemreguler/claude-code-sync/internal/domain"
+	"github.com/melihemreguler/claude-code-sync/internal/fileutil"
 )
 
 // ProjectStatus describes a local project and whether it would sync.
@@ -50,6 +55,86 @@ func (s *Syncer) Manifest() (*domain.Manifest, error) {
 		return nil, err
 	}
 	return s.loadMerged()
+}
+
+// GCResult tallies a garbage-collection pass.
+type GCResult struct {
+	Orphans int
+	Freed   int64 // bytes reclaimed
+}
+
+// GC deletes encrypted object blobs in storage that no manifest shard references
+// — for example, the objects left behind after `device remove` drops the only
+// device that had a project. It never prunes the manifest itself, so any session
+// still listed by some device is kept. With dryRun it reports what it would
+// delete without changing anything.
+//
+// Safety: the live set is built from the fully merged manifest, and a shard that
+// fails to decrypt aborts the whole pass (loadMerged errors) rather than letting
+// its objects look unreferenced.
+func (s *Syncer) GC(dryRun bool) (GCResult, error) {
+	var res GCResult
+	err := s.withLock(func() error {
+		if err := s.EnsureReady(); err != nil {
+			return err
+		}
+		if err := s.refresh(); err != nil {
+			return err
+		}
+		merged, err := s.loadMerged()
+		if err != nil {
+			return err
+		}
+
+		live := map[string]bool{}
+		for keyStr, entry := range merged.Projects {
+			for rel := range entry.Objects {
+				live[s.objectRel(domain.CanonicalKey(keyStr), rel)] = true
+			}
+		}
+
+		objectsRoot := filepath.Join(s.storage.RootDir(), objectsDir)
+		var orphans []string
+		walkErr := filepath.WalkDir(objectsRoot, func(path string, d fs.DirEntry, err error) error {
+			if err != nil {
+				if os.IsNotExist(err) {
+					return nil
+				}
+				return err
+			}
+			if d.IsDir() || strings.HasSuffix(d.Name(), fileutil.TmpSuffix) {
+				return nil
+			}
+			relOS, err := filepath.Rel(s.storage.RootDir(), path)
+			if err != nil {
+				return err
+			}
+			rel := filepath.ToSlash(relOS)
+			if live[rel] {
+				return nil
+			}
+			if info, err := d.Info(); err == nil {
+				res.Freed += info.Size()
+			}
+			orphans = append(orphans, rel)
+			return nil
+		})
+		if walkErr != nil {
+			return walkErr
+		}
+
+		res.Orphans = len(orphans)
+		if dryRun || len(orphans) == 0 {
+			return nil
+		}
+		for _, rel := range orphans {
+			if _, err := s.storage.Delete(rel); err != nil {
+				return err
+			}
+		}
+		return s.storage.Push(fmt.Sprintf("gc: remove %d orphaned object(s)", len(orphans)))
+	})
+	return res, err
 }
 
 // RemoveDevice drops a device from the chain by deleting its manifest shard, then
