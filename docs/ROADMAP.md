@@ -158,9 +158,10 @@ Covers **#4** (config-driven per D5).
 - **Acceptance met:** verified hooks install/remove (other hooks preserved) and
   that a held lock makes a concurrent sync skip. launchd/watch plist generation is
   unit-tested; loading uses launchctl on the user's machine.
-- **Deferred:** cross-device manifest concurrency for blob backends (optimistic
-  ETag/md5 CAS) — the local lock covers same-machine triggers; cross-device
-  simultaneous sync on S3/Drive remains best-avoided (documented).
+- **Resolved in v0.2.0:** cross-device manifest concurrency — the single manifest
+  was sharded per device (`manifests/<device>.age`), so concurrent syncs touch
+  different files and never conflict (git rebases cleanly). This superseded the
+  earlier "deferred ETag/md5 CAS" plan.
 
 ### P5 — Welcome tour + join/merge flows ✅ (shipped)
 Covers **#12**.

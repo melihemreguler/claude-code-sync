@@ -84,6 +84,43 @@ func TestCrossDeviceTranslation(t *testing.T) {
 	}
 }
 
+// Each device writes its own manifest shard; the merged view unions them.
+func TestPerDeviceShards(t *testing.T) {
+	root := t.TempDir()
+
+	claudeA := t.TempDir()
+	cwdA := "/Users/a/dev/github/x"
+	writeSession(t, claudeA, cwdA, "a.jsonl")
+	sA := newSyncer(t, "A", claudeA, "/Users/a", "github.com/acme/x", cwdA, []string{"/Users/a/dev/github"}, root)
+	if _, err := sA.Push(); err != nil {
+		t.Fatal(err)
+	}
+
+	claudeB := t.TempDir()
+	cwdB := "/Users/b/dev/github/y"
+	writeSession(t, claudeB, cwdB, "b.jsonl")
+	sB := newSyncer(t, "B", claudeB, "/Users/b", "github.com/acme/y", cwdB, []string{"/Users/b/dev/github"}, root)
+	if _, err := sB.Push(); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, d := range []string{"A", "B"} {
+		if _, err := os.Stat(filepath.Join(root, "manifests", d+".age")); err != nil {
+			t.Errorf("missing shard for device %s: %v", d, err)
+		}
+	}
+	m, err := sA.Manifest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(m.Devices) != 2 {
+		t.Errorf("merged view should have 2 devices, got %d", len(m.Devices))
+	}
+	if len(m.Projects) != 2 {
+		t.Errorf("merged view should have 2 projects, got %d", len(m.Projects))
+	}
+}
+
 // import --all materializes a project the device has never opened locally, under
 // the originating device's folder name; plain Pull leaves it alone.
 func TestImportMaterializesAbsentProjects(t *testing.T) {

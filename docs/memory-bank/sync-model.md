@@ -49,10 +49,12 @@ content and no project paths. Object directory names are an **HMAC** of the key
 - Per-file: content-equal → skip; else newer (by mtime) wins. Sequential use is
   safe; concurrent edits to one live session are discouraged.
 - Same machine: a `flock` lock serializes overlapping triggers (skip, not queue).
-- git backend rebases on push conflict. **Blob backends (S3/Drive) update the
-  single manifest blob last-writer-wins** — objects are content-addressed so they
-  never collide, but a simultaneous cross-device sync can drop manifest metadata
-  (self-heals next sync). A real fix (optimistic ETag/md5 CAS) is deferred.
+- Cross-device: the manifest is **sharded per device** (`manifests/<device>.age`),
+  so two devices syncing at once write different files and never collide — git
+  rebases cleanly instead of hitting an unmergeable binary (encrypted) manifest.
+  Objects are content-addressed (written once; others skip via hash), so blobs
+  don't collide either. Reads merge all shards; a legacy single `manifest` is read
+  as a baseline so pre-shard chains keep working.
 
 ## Storage backends
 

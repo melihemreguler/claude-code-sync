@@ -84,26 +84,6 @@ func (m *Manifest) UpsertDevice(name, platform string, include, exclude []string
 	})
 }
 
-// RemoveDevice drops a device and its folder mappings, reporting whether it
-// existed.
-func (m *Manifest) RemoveDevice(name string) bool {
-	found := false
-	for i := range m.Devices {
-		if m.Devices[i].Name == name {
-			m.Devices = append(m.Devices[:i], m.Devices[i+1:]...)
-			found = true
-			break
-		}
-	}
-	for key, entry := range m.Projects {
-		if _, ok := entry.Folders[name]; ok {
-			delete(entry.Folders, name)
-			m.Projects[key] = entry
-		}
-	}
-	return found
-}
-
 // RecordProject notes that, on device, the given logical project lives in folder.
 func (m *Manifest) RecordProject(key CanonicalKey, display, device, folder string) {
 	if m.Projects == nil {
@@ -137,6 +117,36 @@ func (m *Manifest) project(key CanonicalKey) ProjectEntry {
 		entry.Objects = map[string]ObjectMeta{}
 	}
 	return entry
+}
+
+// Merge folds other into m: union of devices (latest LastSync wins), project
+// folder mappings, and per-object metadata (latest MTime wins). It is how the
+// per-device manifest shards combine into one view.
+func (m *Manifest) Merge(other *Manifest) {
+	for _, d := range other.Devices {
+		if cur := m.FindDevice(d.Name); cur != nil {
+			if d.LastSync > cur.LastSync {
+				*cur = d
+			}
+		} else {
+			m.Devices = append(m.Devices, d)
+		}
+	}
+	for key, oe := range other.Projects {
+		e := m.project(CanonicalKey(key))
+		if oe.Display != "" {
+			e.Display = oe.Display
+		}
+		for dev, folder := range oe.Folders {
+			e.Folders[dev] = folder
+		}
+		for rel, om := range oe.Objects {
+			if cur, ok := e.Objects[rel]; !ok || om.MTime > cur.MTime {
+				e.Objects[rel] = om
+			}
+		}
+		m.Projects[key] = e
+	}
 }
 
 // SortedDevices returns devices ordered by name for stable output.

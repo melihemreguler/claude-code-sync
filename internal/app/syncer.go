@@ -31,7 +31,8 @@ import (
 
 const (
 	objectsDir   = "objects"
-	manifestFile = "manifest"
+	manifestsDir = "manifests"
+	manifestFile = "manifest" // legacy single-manifest (pre-shard); read-only now
 	objectExt    = ".age"
 )
 
@@ -162,7 +163,7 @@ func (s *Syncer) validateRepo() error {
 	allowed := map[string]bool{
 		".git": true, ".gitignore": true, ".gitattributes": true, ".DS_Store": true,
 		"README.md": true, "LICENSE": true,
-		manifestFile: true, objectsDir: true,
+		manifestFile: true, objectsDir: true, manifestsDir: true,
 	}
 	var foreign []string
 	for _, e := range entries {
@@ -179,10 +180,15 @@ func (s *Syncer) validateRepo() error {
 	return nil
 }
 
-// seed ensures the objects directory exists. Backend-specific hygiene (e.g. a
-// git .gitignore) is handled by the storage adapter's EnsureLocal.
+// seed ensures the objects and manifests directories exist. Backend-specific
+// hygiene (e.g. a git .gitignore) is handled by the storage adapter's EnsureLocal.
 func (s *Syncer) seed() error {
-	return os.MkdirAll(filepath.Join(s.storage.RootDir(), objectsDir), 0o755)
+	for _, d := range []string{objectsDir, manifestsDir} {
+		if err := os.MkdirAll(filepath.Join(s.storage.RootDir(), d), 0o755); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // ErrSyncInProgress is returned when another sync holds the lock on this machine.
@@ -270,7 +276,7 @@ func (s *Syncer) pull(importMissing bool) (Result, error) {
 	if err := s.refresh(); err != nil {
 		return Result{}, err
 	}
-	m, err := s.loadManifest()
+	m, err := s.loadMerged()
 	if err != nil {
 		return Result{}, err
 	}
@@ -356,11 +362,15 @@ func (s *Syncer) push() (Result, error) {
 	if err := s.EnsureReady(); err != nil {
 		return Result{}, err
 	}
-	m, err := s.loadManifest()
+	merged, err := s.loadMerged()
 	if err != nil {
 		return Result{}, err
 	}
-	m.UpsertDevice(s.cfg.Device, config.Platform(), s.include, s.exclude)
+	mine, err := s.loadMyShard()
+	if err != nil {
+		return Result{}, err
+	}
+	mine.UpsertDevice(s.cfg.Device, config.Platform(), s.include, s.exclude)
 
 	var res Result
 	folders, err := s.store.ListProjects()
@@ -379,18 +389,18 @@ func (s *Syncer) push() (Result, error) {
 		if key == "" {
 			continue
 		}
-		n, err := s.pushProject(key, folder, m)
+		n, err := s.pushProject(key, folder, merged, mine)
 		if err != nil {
 			return res, err
 		}
-		m.RecordProject(key, display, s.cfg.Device, folder)
+		mine.RecordProject(key, display, s.cfg.Device, folder)
 		if n > 0 {
 			res.Projects++
 			res.Files += n
 		}
 	}
 
-	if err := s.saveManifest(m); err != nil {
+	if err := s.saveMyShard(mine); err != nil {
 		return res, err
 	}
 	msg := fmt.Sprintf("sync: %d file(s) from %s", res.Files, s.cfg.Device)
@@ -400,12 +410,15 @@ func (s *Syncer) push() (Result, error) {
 	return res, nil
 }
 
-// pushProject encrypts each changed local session file into storage and records
-// its metadata, skipping files that are unchanged or older than what is stored.
-func (s *Syncer) pushProject(key domain.CanonicalKey, folder string, m *domain.Manifest) (int, error) {
+// pushProject encrypts each changed local session file and records it in this
+// device's shard (mine). The blob is written only when the chain (merged) doesn't
+// already hold that exact content, so blobs never duplicate or collide across
+// devices; metadata is always recorded in mine so the shard reflects this device.
+func (s *Syncer) pushProject(key domain.CanonicalKey, folder string, merged, mine *domain.Manifest) (int, error) {
 	count := 0
 	projectDir := s.store.ProjectPath(folder)
-	entry := m.Projects[string(key)]
+	mineObjects := mine.Projects[string(key)].Objects
+	mergedObjects := merged.Projects[string(key)].Objects
 
 	err := filepath.WalkDir(projectDir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -425,10 +438,8 @@ func (s *Syncer) pushProject(key domain.CanonicalKey, folder string, m *domain.M
 			return err
 		}
 		mtime := info.ModTime().UnixNano()
-		// Fast path: an untouched file (mtime unchanged since last sync) needs no
-		// read/hash. We set the local mtime on pull and record it on push, so an
-		// equal mtime means the content is what storage already has.
-		if meta, ok := entry.Objects[rel]; ok && mtime == meta.MTime {
+		// Fast path: unchanged since this device last recorded it.
+		if meta, ok := mineObjects[rel]; ok && mtime == meta.MTime {
 			return nil
 		}
 
@@ -438,24 +449,19 @@ func (s *Syncer) pushProject(key domain.CanonicalKey, folder string, m *domain.M
 		}
 		hash := fileutil.HashBytes(data)
 
-		if meta, ok := entry.Objects[rel]; ok {
-			if meta.Hash == hash {
-				return nil // unchanged
+		// Write the blob only if the chain doesn't already have this content and
+		// our copy isn't older than a differing one already stored.
+		if meta, ok := mergedObjects[rel]; !ok || (meta.Hash != hash && mtime > meta.MTime) {
+			sealed, err := s.crypto.Seal(data)
+			if err != nil {
+				return fmt.Errorf("encrypting %s: %w", rel, err)
 			}
-			if mtime <= meta.MTime {
-				return nil // stored copy is newer — don't clobber
+			if err := fileutil.WriteFileAtomic(s.objectPath(key, rel), sealed, time.Time{}); err != nil {
+				return err
 			}
+			count++
 		}
-
-		sealed, err := s.crypto.Seal(data)
-		if err != nil {
-			return fmt.Errorf("encrypting %s: %w", rel, err)
-		}
-		if err := fileutil.WriteFileAtomic(s.objectPath(key, rel), sealed, time.Time{}); err != nil {
-			return err
-		}
-		m.SetObject(key, rel, domain.ObjectMeta{Hash: hash, MTime: mtime})
-		count++
+		mine.SetObject(key, rel, domain.ObjectMeta{Hash: hash, MTime: mtime})
 		return nil
 	})
 	if os.IsNotExist(err) {
@@ -519,25 +525,82 @@ func (s *Syncer) refresh() error {
 	return s.storage.Pull()
 }
 
-func (s *Syncer) manifestPath() string {
-	return filepath.Join(s.storage.RootDir(), manifestFile)
+// shardPath returns this (or a given) device's manifest shard path.
+func (s *Syncer) shardPath(device string) string {
+	return filepath.Join(s.storage.RootDir(), manifestsDir, shardFileName(device))
 }
 
-func (s *Syncer) loadManifest() (*domain.Manifest, error) {
-	data, err := os.ReadFile(s.manifestPath())
-	if os.IsNotExist(err) {
+// shardFileName sanitizes a device name into a shard filename.
+func shardFileName(device string) string {
+	safe := strings.ReplaceAll(device, "/", "_")
+	return safe + ".age"
+}
+
+// loadMerged reads every manifest shard (plus a legacy single manifest, if any)
+// and merges them into one view. Per-device shards never collide in git, which is
+// what makes concurrent syncs safe.
+func (s *Syncer) loadMerged() (*domain.Manifest, error) {
+	merged := domain.NewManifest()
+
+	// Legacy single manifest (pre-shard chains) as a baseline.
+	if legacy, err := s.readManifestFile(filepath.Join(s.storage.RootDir(), manifestFile)); err != nil {
+		return nil, err
+	} else if legacy != nil {
+		merged.Merge(legacy)
+	}
+
+	dir := filepath.Join(s.storage.RootDir(), manifestsDir)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return merged, nil
+		}
+		return nil, err
+	}
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".age") {
+			continue
+		}
+		shard, err := s.readManifestFile(filepath.Join(dir, e.Name()))
+		if err != nil {
+			return nil, err
+		}
+		if shard != nil {
+			merged.Merge(shard)
+		}
+	}
+	return merged, nil
+}
+
+// loadMyShard reads this device's own shard, or an empty manifest if none.
+func (s *Syncer) loadMyShard() (*domain.Manifest, error) {
+	shard, err := s.readManifestFile(s.shardPath(s.cfg.Device))
+	if err != nil {
+		return nil, err
+	}
+	if shard == nil {
 		return domain.NewManifest(), nil
+	}
+	return shard, nil
+}
+
+// readManifestFile decrypts and parses a manifest file, returning (nil, nil) if
+// it does not exist.
+func (s *Syncer) readManifestFile(path string) (*domain.Manifest, error) {
+	data, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
 	plain, err := s.crypto.Open(data)
 	if err != nil {
-		return nil, fmt.Errorf("opening manifest (wrong key?): %w", err)
+		return nil, fmt.Errorf("opening %s (wrong key?): %w", filepath.Base(path), err)
 	}
 	var m domain.Manifest
 	if err := json.Unmarshal(plain, &m); err != nil {
-		return nil, fmt.Errorf("parsing manifest: %w", err)
+		return nil, fmt.Errorf("parsing %s: %w", filepath.Base(path), err)
 	}
 	if m.Projects == nil {
 		m.Projects = map[string]domain.ProjectEntry{}
@@ -545,14 +608,18 @@ func (s *Syncer) loadManifest() (*domain.Manifest, error) {
 	return &m, nil
 }
 
-func (s *Syncer) saveManifest(m *domain.Manifest) error {
+// saveMyShard encrypts and writes this device's shard.
+func (s *Syncer) saveMyShard(m *domain.Manifest) error {
+	if err := os.MkdirAll(filepath.Join(s.storage.RootDir(), manifestsDir), 0o755); err != nil {
+		return err
+	}
 	data, err := json.MarshalIndent(m, "", "  ")
 	if err != nil {
 		return err
 	}
 	sealed, err := s.crypto.Seal(append(data, '\n'))
 	if err != nil {
-		return fmt.Errorf("sealing manifest: %w", err)
+		return fmt.Errorf("sealing manifest shard: %w", err)
 	}
-	return os.WriteFile(s.manifestPath(), sealed, 0o644)
+	return os.WriteFile(s.shardPath(s.cfg.Device), sealed, 0o644)
 }
