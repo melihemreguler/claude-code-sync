@@ -324,7 +324,10 @@ func anyFolder(entry domain.ProjectEntry) string {
 func (s *Syncer) pullProject(key domain.CanonicalKey, entry domain.ProjectEntry, folder string) (int, error) {
 	count := 0
 	for rel, meta := range entry.Objects {
-		localPath := filepath.Join(s.store.ProjectPath(folder), filepath.FromSlash(rel))
+		localPath, err := fileutil.SafeJoin(s.store.ProjectPath(folder), rel)
+		if err != nil {
+			return count, err
+		}
 		if info, err := os.Stat(localPath); err == nil {
 			if info.ModTime().UnixNano() == meta.MTime {
 				continue // fast path: untouched since last sync

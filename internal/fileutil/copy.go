@@ -5,13 +5,27 @@ package fileutil
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
 // TmpSuffix marks in-progress atomic writes; such files are never propagated.
 const TmpSuffix = ".ccsync.tmp"
+
+// SafeJoin joins a slash-separated relative path onto base, returning an error if
+// the result would escape base (e.g. via "../"). Guards against a corrupt or
+// hostile manifest writing outside the intended directory.
+func SafeJoin(base, rel string) (string, error) {
+	p := filepath.Join(base, filepath.FromSlash(rel))
+	within, err := filepath.Rel(base, p)
+	if err != nil || within == ".." || strings.HasPrefix(within, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("unsafe path %q escapes %q", rel, base)
+	}
+	return p, nil
+}
 
 // HashBytes returns the hex-encoded sha256 of data.
 func HashBytes(data []byte) string {
